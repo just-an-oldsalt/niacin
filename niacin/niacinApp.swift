@@ -1,32 +1,32 @@
-//
-//  niacinApp.swift
-//  niacin
-//
-//  Created by Richard Dort on 2026-05-08.
-//
-
 import SwiftUI
-import SwiftData
+import AppKit
+
+class AppDelegate: NSObject, NSApplicationDelegate {
+    func applicationDidFinishLaunching(_ notification: Notification) {
+        AppState.shared.onLaunch()
+    }
+
+    func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
+        false
+    }
+}
 
 @main
-struct niacinApp: App {
-    var sharedModelContainer: ModelContainer = {
-        let schema = Schema([
-            Item.self,
-        ])
-        let modelConfiguration = ModelConfiguration(schema: schema, isStoredInMemoryOnly: false)
-
-        do {
-            return try ModelContainer(for: schema, configurations: [modelConfiguration])
-        } catch {
-            fatalError("Could not create ModelContainer: \(error)")
-        }
-    }()
+struct NiacinApp: App {
+    @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
+    @State private var appState = AppState.shared
 
     var body: some Scene {
-        WindowGroup {
-            ContentView()
+        MenuBarExtra {
+            MenuBarView()
+                .environment(appState)
+        } label: {
+            Image(systemName: appState.preventer.isActive ? "cup.and.saucer.fill" : "cup.and.saucer")
         }
-        .modelContainer(sharedModelContainer)
+        .menuBarExtraStyle(.menu)
+
+        Settings {
+            SettingsView()
+        }
     }
 }
