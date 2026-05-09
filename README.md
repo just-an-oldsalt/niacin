@@ -1,8 +1,8 @@
-# ☕ niacin
+# ☕ Niacin
 
 **A macOS menu bar utility that keeps your Mac awake — built for enterprise.**
 
-niacin prevents your Mac from sleeping on demand, with fine-grained control over what stays awake: the system, the display, or both. Every setting can be locked and enforced by IT via a JAMF (or any MDM) managed preferences plist.
+Niacin prevents your Mac from sleeping on demand, with fine-grained control over what stays awake: the system, the display, or both. Every setting can be locked and enforced by IT via a JAMF (or any MDM) managed preferences plist.
 
 ---
 
@@ -22,7 +22,7 @@ niacin prevents your Mac from sleeping on demand, with fine-grained control over
 
 ## How it works
 
-niacin wraps macOS's built-in `caffeinate` command:
+Niacin wraps macOS's built-in `caffeinate` command:
 
 | Mode | Flag | Effect |
 |---|---|---|
@@ -56,7 +56,7 @@ No background daemons, no kernel extensions — just a thin Swift wrapper around
 
 ## MDM / JAMF Configuration
 
-niacin reads managed preferences automatically from:
+Niacin reads managed preferences automatically from:
 
 ```
 /Library/Managed Preferences/com.oldsalt.niacin.plist
@@ -174,7 +174,7 @@ Lock a device fully awake with no user control:
 4. Upload your plist or enter the keys manually
 5. Scope the profile to your target computers or groups
 
-macOS will write the plist to `/Library/Managed Preferences/` and niacin will pick it up on next launch without any restart required for most keys.
+macOS will write the plist to `/Library/Managed Preferences/` and Niacin will pick it up on next launch without any restart required for most keys.
 
 ---
 
