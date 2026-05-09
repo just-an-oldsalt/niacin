@@ -71,26 +71,24 @@ struct MenuBarView: View {
     }
 
     private var statusLabel: String {
-        let mode: String
-        if appState.preventer.isAllowingDisplaySleep {
-            mode = "screen can sleep"
-        } else {
-            mode = "screen stays on"
-        }
+        let mode = appState.preventer.isAllowingDisplaySleep
+            ? String(localized: "screen can sleep")
+            : String(localized: "screen stays on")
 
         if let until = appState.preventer.activeUntil {
-            return "Awake until \(until.formatted(date: .omitted, time: .shortened)) \u{00B7} \(mode)"
+            let time = until.formatted(date: .omitted, time: .shortened)
+            return String(localized: "Awake until \(time) · \(mode)")
         }
-        return "Keeping you awake \u{00B7} \(mode)"
+        return String(localized: "Keeping you awake · \(mode)")
     }
 }
 
 private struct MenuManagedToggle: View {
-    let title: String
+    let title: LocalizedStringKey
     let binding: Binding<Bool>
     let managed: Bool?
 
-    init(_ title: String, isOn binding: Binding<Bool>, managed: Bool?) {
+    init(_ title: LocalizedStringKey, isOn binding: Binding<Bool>, managed: Bool?) {
         self.title = title
         self.binding = binding
         self.managed = managed

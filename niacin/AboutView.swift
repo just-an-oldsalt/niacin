@@ -4,7 +4,7 @@ struct AboutView: View {
     private var version: String {
         let v = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "1.0"
         let b = Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "1"
-        return "Version \(v) (\(b))"
+        return String(localized: "Version \(v) (\(b))")
     }
 
     private var appIcon: NSImage {

@@ -16,13 +16,13 @@ struct ActivationDuration: Identifiable, Hashable {
     }
 
     var displayTitle: String {
-        guard let s = seconds else { return "Indefinitely" }
+        guard let s = seconds else { return String(localized: "Indefinitely") }
         let h = s / 3600
         let m = (s % 3600) / 60
         switch (h, m) {
-        case (0, _): return "\(m) \(m == 1 ? "minute" : "minutes")"
-        case (_, 0): return "\(h) \(h == 1 ? "hour" : "hours")"
-        default:     return "\(h)h \(m)m"
+        case (0, _): return String(localized: "\(m) minutes")
+        case (_, 0): return String(localized: "\(h) hours")
+        default:     return String(localized: "\(h)h \(m)m")
         }
     }
 

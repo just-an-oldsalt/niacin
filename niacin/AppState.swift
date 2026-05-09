@@ -17,7 +17,7 @@ final class AppState {
     // Drives the menu bar countdown label; nil when inactive or indefinite
     private(set) var countdownText: String? = nil
     // Drives the menu bar tooltip
-    private(set) var tooltipText: String = "Niacin — Inactive"
+    private(set) var tooltipText: String = String(localized: "Niacin — Inactive")
     // Incremented on every policy reload; views read this via .id(...) to force
     // a fresh re-render so static ManagedPreferences.* reads pick up new values.
     private(set) var policyRevision: Int = 0
@@ -137,36 +137,38 @@ final class AppState {
         countdownTimer?.invalidate()
         countdownTimer = nil
         countdownText = nil
-        tooltipText = "Niacin — Inactive"
+        tooltipText = String(localized: "Niacin — Inactive")
     }
 
     private func updateCountdown() {
         guard preventer.isActive else { stopCountdownTimer(); return }
         guard let until = preventer.activeUntil else {
             countdownText = nil
-            tooltipText = "Niacin — Keeping you awake"
+            tooltipText = String(localized: "Niacin — Keeping you awake")
             return
         }
         let remaining = Int(until.timeIntervalSinceNow)
         guard remaining > 0 else {
             countdownText = nil
-            tooltipText = "Niacin — Keeping you awake"
+            tooltipText = String(localized: "Niacin — Keeping you awake")
             return
         }
         let formatted = Self.format(seconds: remaining)
         countdownText = formatted
-        tooltipText = "Niacin — \(formatted) remaining"
+        tooltipText = String(localized: "Niacin — \(formatted) remaining")
     }
 
     private static func format(seconds: Int) -> String {
         if seconds >= 3600 {
             let h = seconds / 3600
             let m = (seconds % 3600) / 60
-            return m > 0 ? "\(h)h \(m)m" : "\(h)h"
+            return m > 0
+                ? String(localized: "\(h)h \(m)m")
+                : String(localized: "\(h)h")
         } else if seconds >= 60 {
-            return "\(seconds / 60)m"
+            return String(localized: "\(seconds / 60)m")
         } else {
-            return "\(seconds)s"
+            return String(localized: "\(seconds)s")
         }
     }
 
