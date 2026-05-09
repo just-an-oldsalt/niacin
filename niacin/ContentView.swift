@@ -3,6 +3,7 @@ import AppKit
 
 struct MenuBarView: View {
     @Environment(AppState.self) private var appState
+    @Environment(\.openWindow) private var openWindow
 
     @AppStorage("allowDisplaySleep") private var allowDisplaySleep = false
     @AppStorage("preventDeviceLock") private var preventDeviceLock = false
@@ -45,6 +46,10 @@ struct MenuBarView: View {
 
         SettingsLink {
             Text("Settings\u{2026}")
+        }
+        Button("About Niacin") {
+            openWindow(id: "about")
+            NSApp.activate(ignoringOtherApps: true)
         }
 
         if !ManagedPreferences.disableQuit {

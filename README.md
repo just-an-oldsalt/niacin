@@ -1,6 +1,6 @@
 # ☕ Niacin
 
-**A macOS menu bar utility that keeps your Mac awake — built for enterprise.**
+**[niacin.dort.zone](https://niacin.dort.zone/) · A macOS menu bar utility that keeps your Mac awake — built for enterprise.**
 
 Niacin prevents your Mac from sleeping on demand, with fine-grained control over what stays awake: the system, the display, or both. Every setting can be locked and enforced by IT via a JAMF (or any MDM) managed preferences plist.
 
