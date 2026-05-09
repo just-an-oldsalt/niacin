@@ -85,11 +85,11 @@ struct SettingsView: View {
 
 // A Toggle that shows a lock icon and becomes read-only when managed by MDM
 private struct ManagedToggle: View {
-    let title: String
+    let title: LocalizedStringKey
     let binding: Binding<Bool>
     let managed: Bool?
 
-    init(_ title: String, isOn binding: Binding<Bool>, managed: Bool?) {
+    init(_ title: LocalizedStringKey, isOn binding: Binding<Bool>, managed: Bool?) {
         self.title = title
         self.binding = binding
         self.managed = managed
@@ -113,11 +113,11 @@ private struct ManagedToggle: View {
 
 // A labelled row used in the managed policy section
 private struct PolicyRow: View {
-    let text: String
+    let text: LocalizedStringKey
     let icon: String
     let tint: Color
 
-    init(_ text: String, icon: String, tint: Color) {
+    init(_ text: LocalizedStringKey, icon: String, tint: Color) {
         self.text = text
         self.icon = icon
         self.tint = tint
