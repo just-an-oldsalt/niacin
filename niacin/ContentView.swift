@@ -4,6 +4,7 @@ import AppKit
 struct MenuBarView: View {
     @Environment(AppState.self) private var appState
     @Environment(\.openWindow) private var openWindow
+    @Environment(\.openSettings) private var openSettings
 
     @AppStorage("allowDisplaySleep") private var allowDisplaySleep = false
     @AppStorage("preventDeviceLock") private var preventDeviceLock = false
@@ -44,8 +45,9 @@ struct MenuBarView: View {
             Divider()
         }
 
-        SettingsLink {
-            Text("Settings\u{2026}")
+        Button("Settings\u{2026}") {
+            openSettings()
+            NSApp.activate(ignoringOtherApps: true)
         }
         Button("About Niacin") {
             openWindow(id: "about")
