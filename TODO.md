@@ -50,6 +50,7 @@ Audit found mixed casing. Decide on **Niacin** as the canonical proper-noun spel
 ## Enterprise / MDM
 - **Ship a sample `.mobileconfig`** alongside the example plists in the README, ready to upload to JAMF
 - **Document signing & notarization** — current README doesn't cover distribution; add a section for org deployment
+- **Signed-release CI workflow** — tag-triggered job that builds Release config, signs with a Developer ID Application cert, notarizes via `xcrun notarytool submit --wait`, staples with `xcrun stapler staple`, then zips with `ditto -c -k --keepParent` and uploads to the GitHub Release. Required secrets: `DEVELOPER_ID_P12` + `DEVELOPER_ID_P12_PASSWORD` for signing, and an App Store Connect API key (`APP_STORE_CONNECT_KEY_ID` / `ISSUER_ID` / `API_KEY`) for notarization. Do NOT publish unsigned builds — Gatekeeper blocks them and trains users to bypass security warnings.
 
 ## Polish & UX
 - **First-launch onboarding sheet** — short explainer for non-IT users; suppressed when `activateOnLaunch` is managed
