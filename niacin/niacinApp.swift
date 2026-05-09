@@ -6,6 +6,13 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         AppState.shared.onLaunch()
     }
 
+    // Reload policy whenever the app gains focus — covers cases where the
+    // kqueue watcher missed an event (network mounts, atomic-replace edge
+    // cases) and the user is now interacting with us.
+    func applicationDidBecomeActive(_ notification: Notification) {
+        AppState.shared.reloadPolicy()
+    }
+
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
         false
     }

@@ -1,10 +1,41 @@
 import Foundation
+import OSLog
+
+private let log = Logger(subsystem: "com.oldsalt.niacin", category: "managed-prefs")
 
 // Reads MDM-managed preferences deployed by JAMF or any MDM solution.
 // JAMF deploys the plist to: /Library/Managed Preferences/com.oldsalt.niacin.plist
-// CFPreferences resolves the managed domain automatically — no extra configuration needed.
+//
+// We read the managed plists directly from disk rather than via
+// CFPreferencesCopyAppValue. cfprefsd aggressively caches the managed domain
+// and doesn't reliably invalidate its cache on direct plist edits — it
+// expects ingestion via mdmclient / `profiles install`. Reading from disk
+// guarantees live changes are picked up.
 struct ManagedPreferences {
-    private static let appID = (Bundle.main.bundleIdentifier ?? "com.oldsalt.niacin") as CFString
+    private static let bundleID = Bundle.main.bundleIdentifier ?? "com.oldsalt.niacin"
+
+    // Per-user managed plist takes precedence over system-wide, matching
+    // CFPreferences's resolution order for the managed domain.
+    private static var managedPaths: [String] {
+        [
+            "/Library/Managed Preferences/\(NSUserName())/\(bundleID).plist",
+            "/Library/Managed Preferences/\(bundleID).plist",
+        ]
+    }
+
+    private static func managedValue(_ key: String) -> Any? {
+        for path in managedPaths {
+            guard FileManager.default.fileExists(atPath: path) else { continue }
+            guard let dict = NSDictionary(contentsOfFile: path) else {
+                log.error("failed to parse \(path, privacy: .public) — check XML syntax")
+                continue
+            }
+            if let value = dict[key] {
+                return value
+            }
+        }
+        return nil
+    }
 
     // Master kill switch — set false to disable the app entirely
     static var isEnabled: Bool               { bool("enabled") ?? true }
@@ -37,39 +68,34 @@ struct ManagedPreferences {
 
     // Override the available durations list entirely (array of seconds as integers)
     static var allowedDurations: [Int]? {
-        guard let raw = CFPreferencesCopyAppValue("allowedDurations" as CFString, appID),
-              let array = raw as? [Any] else { return nil }
-        // CFPreferences returns NSNumber elements, not Int
+        guard let array = managedValue("allowedDurations") as? [Any] else { return nil }
         let ints = array.compactMap { ($0 as? NSNumber)?.intValue }
         return ints.isEmpty ? nil : ints
     }
 
-    // Returns true only if the key exists in a managed preferences plist on disk,
-    // not just in user defaults — prevents spurious lock icons on user-set prefs
+    // True only if the key is set in a managed preferences plist (vs. user
+    // defaults) — drives lock icons.
     static func isManaged(key: String) -> Bool {
-        let bundleID = Bundle.main.bundleIdentifier ?? "com.oldsalt.niacin"
-        let paths = [
-            "/Library/Managed Preferences/\(bundleID).plist",
-            "/Library/Managed Preferences/\(NSUserName())/\(bundleID).plist"
-        ]
-        return paths.contains { (NSDictionary(contentsOfFile: $0)?[key]) != nil }
+        managedValue(key) != nil
     }
 
     private static func bool(_ key: String) -> Bool? {
-        guard let raw = CFPreferencesCopyAppValue(key as CFString, appID) else { return nil }
-        // Plist booleans come back as CFBoolean — use CFBooleanGetValue for a reliable read
-        if CFGetTypeID(raw) == CFBooleanGetTypeID() {
-            return CFBooleanGetValue((raw as! CFBoolean))
+        guard let raw = managedValue(key) else {
+            log.debug("bool(\(key, privacy: .public)): not found in managed domain")
+            return nil
         }
-        // Integer 0/1 fallback (some MDM systems encode booleans as numbers)
-        return (raw as? NSNumber)?.boolValue
+        let value = (raw as? NSNumber)?.boolValue
+        log.debug("bool(\(key, privacy: .public)): \(value.map(String.init) ?? "nil", privacy: .public)")
+        return value
     }
 
     private static func int(_ key: String) -> Int? {
-        guard let raw = CFPreferencesCopyAppValue(key as CFString, appID) else { return nil }
-        if CFGetTypeID(raw) == CFNumberGetTypeID() {
-            return (raw as? NSNumber)?.intValue
+        guard let raw = managedValue(key) else {
+            log.debug("int(\(key, privacy: .public)): not found in managed domain")
+            return nil
         }
-        return nil
+        let value = (raw as? NSNumber)?.intValue
+        log.debug("int(\(key, privacy: .public)): \(value.map(String.init) ?? "nil", privacy: .public)")
+        return value
     }
 }

@@ -1,5 +1,8 @@
 import Foundation
 import AppKit
+import OSLog
+
+private let log = Logger(subsystem: "com.oldsalt.niacin", category: "policy")
 
 @Observable
 @MainActor
@@ -9,19 +12,20 @@ final class AppState {
     let preventer = SleepPreventer()
     private var hasLaunched = false
     private var countdownTimer: Timer?
-    private var policyPollTimer: Timer?
-    private var lastPlistModDates: [String: Date] = [:]
+    private let policyWatcher = PolicyWatcher()
 
     // Drives the menu bar countdown label; nil when inactive or indefinite
     private(set) var countdownText: String? = nil
     // Drives the menu bar tooltip
     private(set) var tooltipText: String = "Niacin — Inactive"
-    // Incremented on every policy reload; observed by computed properties to force re-renders
+    // Incremented on every policy reload; views read this via .id(...) to force
+    // a fresh re-render so static ManagedPreferences.* reads pick up new values.
     private(set) var policyRevision: Int = 0
 
-    // The durations shown in the menu, filtered and capped by managed policy
+    // The durations shown in the menu, filtered and capped by managed policy.
+    // Views must apply `.id(appState.policyRevision)` on the enclosing container
+    // so this getter is re-invoked when policy changes.
     var availableDurations: [ActivationDuration] {
-        _ = policyRevision // establish dependency so policy changes trigger re-evaluation
         var durations: [ActivationDuration]
 
         if let managed = ManagedPreferences.allowedDurations {
@@ -53,7 +57,10 @@ final class AppState {
     }
 
     func activate(duration: ActivationDuration) {
-        guard ManagedPreferences.isEnabled else { return }
+        guard ManagedPreferences.isEnabled else {
+            log.warning("activate blocked — app disabled by policy")
+            return
+        }
 
         let allowDisplaySleep = ManagedPreferences.allowDisplaySleep
             ?? UserDefaults.standard.bool(forKey: "allowDisplaySleep")
@@ -63,18 +70,27 @@ final class AppState {
         // preventDeviceLock requires the display to stay on, overriding allowDisplaySleep
         let effectiveAllowDisplaySleep = allowDisplaySleep && !preventDeviceLock
 
+        log.info("activating: duration=\(duration.displayTitle, privacy: .public) allowDisplaySleep=\(effectiveAllowDisplaySleep, privacy: .public)")
         preventer.activate(duration: duration.timeInterval, allowDisplaySleep: effectiveAllowDisplaySleep)
         startCountdownTimer(timed: duration.timeInterval != nil)
     }
 
     func deactivate() {
-        guard ManagedPreferences.allowUserToDisable else { return }
+        guard ManagedPreferences.allowUserToDisable else {
+            log.warning("deactivate blocked — allowUserToDisable=false")
+            return
+        }
+        log.info("deactivating (user request)")
         preventer.deactivate()
         stopCountdownTimer()
     }
 
     func toggle() {
-        preventer.isActive ? deactivate() : activate(duration: availableDurations.first ?? .indefinite)
+        if preventer.isActive {
+            deactivate()
+        } else if let first = availableDurations.first {
+            activate(duration: first)
+        }
     }
 
     func onLaunch() {
@@ -83,8 +99,8 @@ final class AppState {
 
         let shouldActivate = ManagedPreferences.activateOnLaunch
             ?? UserDefaults.standard.bool(forKey: "activateOnLaunch")
-        if shouldActivate && ManagedPreferences.isEnabled {
-            activate(duration: availableDurations.first ?? .indefinite)
+        if shouldActivate && ManagedPreferences.isEnabled, let first = availableDurations.first {
+            activate(duration: first)
         }
 
         NotificationCenter.default.addObserver(
@@ -157,7 +173,15 @@ final class AppState {
     // MARK: - Live policy reload
 
     private func startPolicyWatcher() {
-        // Catch JAMF profile installs/removals instantly via distributed notification
+        // kqueue file watcher on the managed plist paths — fires within milliseconds.
+        policyWatcher.start { [weak self] in
+            log.info("policy watcher fired — reloading policy")
+            self?.reloadPolicy()
+        }
+
+        // Best-effort: cfprefsd posts this when a managed preferences domain
+        // changes. Not documented and not guaranteed; the kqueue watcher is
+        // the real workhorse, but if it fires we get an even faster reaction.
         DistributedNotificationCenter.default().addObserver(
             self,
             selector: #selector(managedConfigChanged),
@@ -165,51 +189,65 @@ final class AppState {
             object: nil
         )
 
-        // Poll plist mod dates every 5 seconds — reliable regardless of how the file
-        // is written (in-place, replace, JAMF, sudo defaults write, etc.)
-        let timer = Timer(timeInterval: 5, repeats: true) { [weak self] _ in
-            Task { @MainActor [weak self] in self?.checkPlistChanges() }
-        }
-        RunLoop.main.add(timer, forMode: .common)
-        policyPollTimer = timer
+        // After waking from sleep, the kqueue may have missed events that
+        // happened while we were suspended. Force a reload.
+        NSWorkspace.shared.notificationCenter.addObserver(
+            self,
+            selector: #selector(systemDidWake),
+            name: NSWorkspace.didWakeNotification,
+            object: nil
+        )
     }
 
-    @objc private func managedConfigChanged() {
+    @objc private func systemDidWake() {
+        log.info("system woke — reloading policy")
         reloadPolicy()
     }
 
-    private func checkPlistChanges() {
-        let bundleID = Bundle.main.bundleIdentifier ?? "com.oldsalt.niacin"
-        let paths = [
-            "/Library/Managed Preferences/\(bundleID).plist",
-            "/Library/Managed Preferences/\(NSUserName())/\(bundleID).plist"
-        ]
-
-        var changed = false
-        for path in paths {
-            let modDate = (try? FileManager.default.attributesOfItem(atPath: path))?[.modificationDate] as? Date
-            if modDate != lastPlistModDates[path] {
-                lastPlistModDates[path] = modDate
-                changed = true
-            }
-        }
-
-        if changed { reloadPolicy() }
+    @objc private func managedConfigChanged() {
+        log.info("managedConfigChanged notification received — reloading policy")
+        reloadPolicy()
     }
 
     func reloadPolicy() {
-        let bundleID = (Bundle.main.bundleIdentifier ?? "com.oldsalt.niacin") as CFString
-        CFPreferencesAppSynchronize(bundleID)
-        CFPreferencesSynchronize(bundleID, kCFPreferencesAnyUser, kCFPreferencesCurrentHost)
-        CFPreferencesSynchronize(bundleID, kCFPreferencesCurrentUser, kCFPreferencesCurrentHost)
-        CFPreferencesSynchronize(bundleID, kCFPreferencesAnyUser, kCFPreferencesAnyHost)
-
-        // Always bump so availableDurations and lock icons re-evaluate
+        // ManagedPreferences reads directly from disk, so no cfprefsd sync
+        // is needed — the next read will see the current plist contents.
         policyRevision += 1
+        log.info("policyRevision=\(self.policyRevision, privacy: .public) isActive=\(self.preventer.isActive, privacy: .public) isEnabled=\(ManagedPreferences.isEnabled, privacy: .public)")
 
-        // Deactivate any running session — new policy is enforced on next activation
         guard preventer.isActive else { return }
-        preventer.deactivate()
-        stopCountdownTimer()
+
+        // Only interrupt the running session if the new policy is incompatible
+        // with it. A compatible change (e.g. lock icons, allowUserToDisable
+        // flipping) leaves caffeinate running.
+        if let reason = sessionIncompatibilityReason() {
+            log.info("deactivating running session: \(reason, privacy: .public)")
+            preventer.deactivate()
+            stopCountdownTimer()
+        }
+    }
+
+    // Returns a human-readable reason why the current session must end under
+    // the new policy, or nil if it can keep running.
+    private func sessionIncompatibilityReason() -> String? {
+        if !ManagedPreferences.isEnabled {
+            return "app disabled by policy"
+        }
+        let isIndefinite = preventer.activeUntil == nil
+        if isIndefinite && !ManagedPreferences.allowIndefinite {
+            return "indefinite activation no longer permitted"
+        }
+        if let max = ManagedPreferences.maxDurationSeconds {
+            if isIndefinite {
+                return "indefinite session exceeds maxDurationSeconds=\(max)"
+            }
+            if let until = preventer.activeUntil {
+                let remaining = Int(until.timeIntervalSinceNow)
+                if remaining > max {
+                    return "remaining=\(remaining)s exceeds maxDurationSeconds=\(max)"
+                }
+            }
+        }
+        return nil
     }
 }
