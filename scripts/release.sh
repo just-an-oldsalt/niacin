@@ -136,7 +136,11 @@ xcodebuild -exportArchive \
 
 step "Verifying signature & hardened runtime"
 codesign --verify --strict --deep "$APP"
-codesign --display --verbose=4 "$APP" 2>&1 | grep -q "flags=.*runtime" \
+# Capture codesign output rather than piping — `grep -q` exits on first
+# match, killing codesign via SIGPIPE, which under `pipefail` makes the
+# pipeline look failed even when the runtime flag is present.
+codesign_info=$(codesign --display --verbose=4 "$APP" 2>&1)
+[[ "$codesign_info" == *"flags=0x"*"(runtime)"* ]] \
     || fail "Hardened Runtime is not enabled on the .app — notarization will reject it. Enable in target → Build Settings → 'Enable Hardened Runtime' = YES."
 
 # ─── Notarize the .app, then staple ────────────────────────────────────
