@@ -59,3 +59,4 @@ Audit found mixed casing. Decide on **Niacin** as the canonical proper-noun spel
 
 ## Code health
 - **Crash log forwarding** — at minimum, document where `os.Logger` output lands so IT can collect it
+- **Swift 6 strict-concurrency cleanup** — `PolicyWatcher.swift:31` warns that `self.onChange = onChange` loses the `@MainActor` annotation when crossing the `queue.async` boundary. Cosmetic warning today (build/notarize succeed) but will be a hard error when the project flips to Swift 6 language mode. Fix: annotate the `onChange` storage and the `start(onChange:)` parameter as `@Sendable @MainActor` so the types match exactly across the dispatch boundary.
