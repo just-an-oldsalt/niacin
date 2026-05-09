@@ -26,7 +26,7 @@ struct AboutView: View {
                     .foregroundStyle(.secondary)
             }
 
-            Text("Keeps your Mac awake — built for enterprise.")
+            Text("Keeps your Mac awake — built for the enterprise.")
                 .font(.callout)
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)
@@ -39,11 +39,6 @@ struct AboutView: View {
                     Link("GitHub", destination: URL(string: "https://github.com/just-an-oldsalt/niacin")!)
                 }
                 .font(.callout)
-
-                Text("Inspired by [KeepingYouAwake](https://github.com/newmarcel/KeepingYouAwake) by Marcel Dierkes.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .multilineTextAlignment(.center)
             }
 
             Text("MIT License")
