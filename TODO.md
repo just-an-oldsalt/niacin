@@ -41,7 +41,6 @@ Audit found mixed casing. Decide on **Niacin** as the canonical proper-noun spel
   - Notarize each release; Sparkle requires signed + notarized updates to apply silently
 - **Global hotkey to toggle** — quick activation without opening the menu (configurable, MDM-lockable)
 - **Custom user durations** — let users add their own preset alongside the defaults (still subject to `maxDurationSeconds`)
-- **Live countdown in the menu bar** — show remaining time as a small label or in the tooltip when a timed session is running
 - **Auto-deactivate on battery / low battery** — common request for laptop users; trivial via `IOPSCopyPowerSourcesInfo`
 - **Activate while specific apps are running** — e.g., Zoom, Teams, OBS; uses `NSWorkspace.runningApplications`
 - **Schedule windows** — "always awake 09:00–17:00 on weekdays". Useful for kiosks, also MDM-controllable
@@ -49,19 +48,13 @@ Audit found mixed casing. Decide on **Niacin** as the canonical proper-noun spel
 - **Notify on auto-deactivate** — optional `UserNotification` so people aren't surprised when caffeinate ends
 
 ## Enterprise / MDM
-- **Live-reload managed preferences** — watch `/Library/Managed Preferences/` with `DispatchSource.makeFileSystemObjectSource` so policy pushes apply without a relaunch
 - **Ship a sample `.mobileconfig`** alongside the example plists in the README, ready to upload to JAMF
-- **Unified logging** — `os.Logger` calls for activate/deactivate/policy events so IT can audit via Console.app
 - **Document signing & notarization** — current README doesn't cover distribution; add a section for org deployment
 
 ## Polish & UX
 - **First-launch onboarding sheet** — short explainer for non-IT users; suppressed when `activateOnLaunch` is managed
-- **About window** — version, build, link to README, attribution to KeepingYouAwake
 - **VoiceOver labels** on menu items and the menu bar icon — currently nothing read out for assistive tech
 - **Settings window resizability / layout pass** — the fixed `width: 380, height: 340` is tight once we add localization (German strings will overflow)
-- **Tooltip on the menu bar icon** showing current status without opening the menu
 
 ## Code health
-- **Real tests** — `niacinTests/niacinTests.swift` is the Xcode stub. Worth covering: `ManagedPreferences` value resolution (boolean/integer/array decoding edge cases), `ActivationDuration.displayTitle`, `availableDurations` filtering under various policy combos
-- **CI build** — GitHub Actions workflow that runs `xcodebuild test` on push
 - **Crash log forwarding** — at minimum, document where `os.Logger` output lands so IT can collect it

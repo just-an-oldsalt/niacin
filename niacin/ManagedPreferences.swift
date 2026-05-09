@@ -16,7 +16,8 @@ struct ManagedPreferences {
 
     // Per-user managed plist takes precedence over system-wide, matching
     // CFPreferences's resolution order for the managed domain.
-    private static var managedPaths: [String] {
+    // Exposed as a closure so tests can point it at temporary files.
+    nonisolated(unsafe) static var pathsProvider: () -> [String] = {
         [
             "/Library/Managed Preferences/\(NSUserName())/\(bundleID).plist",
             "/Library/Managed Preferences/\(bundleID).plist",
@@ -24,7 +25,7 @@ struct ManagedPreferences {
     }
 
     private static func managedValue(_ key: String) -> Any? {
-        for path in managedPaths {
+        for path in pathsProvider() {
             guard FileManager.default.fileExists(atPath: path) else { continue }
             guard let dict = NSDictionary(contentsOfFile: path) else {
                 log.error("failed to parse \(path, privacy: .public) — check XML syntax")
