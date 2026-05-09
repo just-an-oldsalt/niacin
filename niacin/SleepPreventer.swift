@@ -1,4 +1,7 @@
 import Foundation
+import OSLog
+
+private let log = Logger(subsystem: "com.oldsalt.niacin", category: "caffeinate")
 
 @Observable
 @MainActor
@@ -36,23 +39,30 @@ final class SleepPreventer {
             process = p
             isActive = true
             isAllowingDisplaySleep = allowDisplaySleep
+            let durationDesc = activeUntil.map { "until \($0.formatted(date: .omitted, time: .shortened))" } ?? "indefinitely"
+            log.info("caffeinate started: args=\(args.joined(separator: " "), privacy: .public) \(durationDesc, privacy: .public)")
         } catch {
             activeUntil = nil
+            log.error("caffeinate failed to start: \(error.localizedDescription, privacy: .public)")
         }
     }
 
     func deactivate() {
+        guard process != nil else { return }
         process?.terminate()
         process = nil
         isActive = false
         activeUntil = nil
         isAllowingDisplaySleep = false
+        log.info("caffeinate stopped (deactivate called)")
     }
 
     private func handleTermination() {
+        guard process != nil || isActive else { return }
         process = nil
         isActive = false
         activeUntil = nil
         isAllowingDisplaySleep = false
+        log.info("caffeinate process terminated naturally")
     }
 }
