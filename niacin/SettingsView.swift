@@ -6,7 +6,11 @@ struct SettingsView: View {
     @AppStorage("preventDeviceLock") private var preventDeviceLock = false
     @AppStorage("deactivateOnUserSwitch") private var deactivateOnUserSwitch = false
 
+    // Observing policyRevision ensures the view re-renders when IT pushes or removes policy
+    @State private var appState = AppState.shared
+
     var body: some View {
+        let _ = appState.policyRevision
         Form {
             Section("General") {
                 ManagedToggle(
