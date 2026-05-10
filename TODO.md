@@ -6,15 +6,7 @@ A working list. Roughly grouped; order within each group is rough priority.
 
 ## Priorities (Richard)
 
-### 1. Language support (localization)
-All user-facing strings are English literals in Swift source. Need to:
-- Wrap strings in `String(localized:)` / `LocalizedStringKey` (mostly already SwiftUI-friendly)
-- Add `Localizable.xcstrings` (Xcode 15+ string catalog) and pull strings from `MenuBarView`, `SettingsView`, `ActivationDuration.displayTitle`, the policy rows, and `"Quit Niacin"`
-- Pluralization for durations ("1 minute" vs "5 minutes") via `.stringsdict` rules in the catalog
-- First targets to consider: en, fr, de, es, it, ja, zh-Hans (priorities depend on deployment regions)
-- Note: duration formatting should ideally go through `Duration.UnitsFormatStyle` so the locale handles it for us
-
-### 2. Better menu bar icon
+### 1. Better menu bar icon
 Currently `cup.and.saucer` / `cup.and.saucer.fill` SF Symbols. Options:
 - Custom template PNG/PDF in the asset catalogue (monochrome, auto-tints to menu bar colour)
 - A pill / vitamin-capsule glyph would lean into the "niacin = vitamin B3" name
@@ -22,7 +14,7 @@ Currently `cup.and.saucer` / `cup.and.saucer.fill` SF Symbols. Options:
 - Optional: small countdown badge or timer ring while a timed session is running
 - Make sure the asset is a true template image (`isTemplate = true`) so dark/light menu bars both render correctly
 
-### 3. Capitalize "Niacin" everywhere user-facing
+### 2. Capitalize "Niacin" everywhere user-facing
 Audit found mixed casing. Decide on **Niacin** as the canonical proper-noun spelling, then:
 - `README.md` heading and prose (currently lowercase "niacin" throughout)
 - `Info.plist` `CFBundleDisplayName` / `CFBundleName` (verify in Xcode build settings — currently the target/product name is `niacin`)
@@ -55,7 +47,9 @@ Audit found mixed casing. Decide on **Niacin** as the canonical proper-noun spel
 ## Polish & UX
 - **First-launch onboarding sheet** — short explainer for non-IT users; suppressed when `activateOnLaunch` is managed
 - **VoiceOver labels** on menu items and the menu bar icon — currently nothing read out for assistive tech
-- **Settings window resizability / layout pass** — the fixed `width: 380, height: 340` is tight once we add localization (German strings will overflow)
+- **Settings window resizability / layout pass** — the fixed `width: 380, height: 340` is tight in German (longest current locale); once ja/zh-Hans land it'll need to flex
+- **ja and zh-Hans translations** — deferred from the v1.2 localization push. Both deserve a native review and have layout/font implications (Japanese tends to run wider, Chinese narrower; Japanese has only an `other` plural form)
+- **Native review of fr/de/es/it translations** — shipped from a fluent generalist, not a professional translator. Worth a sanity-pass before broad enterprise distribution. Most likely nitpicks: the menu-bar status fragments ("screen can sleep", "screen stays on") which sit awkwardly mid-sentence in some Romance constructions
 
 ## Code health
 - **Crash log forwarding** — at minimum, document where `os.Logger` output lands so IT can collect it
