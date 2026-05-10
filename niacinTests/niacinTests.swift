@@ -203,6 +203,24 @@ struct ManagedPreferencesTests {
         }
     }
 
+    @Test func disableAutoUpdateDefaultsToFalseAndHonoursPlist() {
+        let dir = Self.makeTempDir()
+        defer { Self.cleanup(dir) }
+        let plist = dir.appendingPathComponent("p.plist")
+
+        // No key set → default false (auto-updates allowed).
+        Self.write([:], to: plist)
+        Self.withPaths([plist.path]) {
+            #expect(ManagedPreferences.disableAutoUpdate == false)
+        }
+
+        // Explicit true → MDM-locked, auto-updates disabled.
+        Self.write(["disableAutoUpdate": true], to: plist)
+        Self.withPaths([plist.path]) {
+            #expect(ManagedPreferences.disableAutoUpdate == true)
+        }
+    }
+
     @Test func isManagedReportsWhetherKeyIsInPlist() {
         let dir = Self.makeTempDir()
         defer { Self.cleanup(dir) }

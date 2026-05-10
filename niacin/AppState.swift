@@ -1,6 +1,7 @@
 import Foundation
 import AppKit
 import OSLog
+import Sparkle
 
 private let log = Logger(subsystem: "com.oldsalt.niacin", category: "policy")
 
@@ -13,6 +14,7 @@ final class AppState {
     private var hasLaunched = false
     private var countdownTimer: Timer?
     private let policyWatcher = PolicyWatcher()
+    private(set) var updater: SPUUpdater?
 
     // Drives the menu bar countdown label; nil when inactive or indefinite
     private(set) var countdownText: String? = nil
@@ -216,6 +218,7 @@ final class AppState {
         // is needed — the next read will see the current plist contents.
         policyRevision += 1
         log.info("policyRevision=\(self.policyRevision, privacy: .public) isActive=\(self.preventer.isActive, privacy: .public) isEnabled=\(ManagedPreferences.isEnabled, privacy: .public)")
+        enforceAutoUpdatePolicy()
 
         guard preventer.isActive else { return }
 
@@ -226,6 +229,25 @@ final class AppState {
             log.info("deactivating running session: \(reason, privacy: .public)")
             preventer.deactivate()
             stopCountdownTimer()
+        }
+    }
+
+    // MARK: - Sparkle wiring
+
+    // Called once from NiacinApp.init after the SPUStandardUpdaterController
+    // is created. Lets AppState gate auto-checks on the managed-policy key.
+    func attachUpdater(_ updater: SPUUpdater) {
+        self.updater = updater
+        enforceAutoUpdatePolicy()
+        log.info("updater attached, autoCheck=\(updater.automaticallyChecksForUpdates, privacy: .public)")
+    }
+
+    private func enforceAutoUpdatePolicy() {
+        guard let updater else { return }
+        let allowed = !ManagedPreferences.disableAutoUpdate
+        if updater.automaticallyChecksForUpdates != allowed {
+            updater.automaticallyChecksForUpdates = allowed
+            log.info("auto-update policy change → autoCheck=\(allowed, privacy: .public)")
         }
     }
 
