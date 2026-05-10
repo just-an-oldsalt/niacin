@@ -27,6 +27,18 @@
             scripts/release.sh prints one ready to paste.
         -->
         <item>
+            <title>Niacin 1.9</title>
+            <pubDate>Sun, 10 May 2026 22:12:17 +0000</pubDate>
+            <sparkle:version>10</sparkle:version>
+            <sparkle:shortVersionString>1.9</sparkle:shortVersionString>
+            <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
+            <enclosure
+                url="https://github.com/just-an-oldsalt/niacin/releases/download/v1.9/niacin-1.9.zip"
+                length="3210807"
+                type="application/octet-stream"
+                sparkle:edSignature="VEStHWeCBHdAaAafpeLg/Q77UF+mqDPDzzv+J6C1J7efyCt4sVTEmqpSp3y1HnS07pFB2DAB8BAkzs1jhc5nBw==" />
+        </item>
+        <item>
             <title>Niacin 1.8</title>
             <pubDate>Sun, 10 May 2026 21:26:36 +0000</pubDate>
             <sparkle:version>9</sparkle:version>
