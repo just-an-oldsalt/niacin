@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    Niacin Sparkle appcast.
+
+    Published at: https://niacin.dort.zone/appcast.xml
+    Polled by every installed copy of Niacin (SUFeedURL build setting).
+
+    Per-release flow:
+    1. Run scripts/release.sh — it prints a ready-to-paste <item> block.
+    2. Paste that block as the FIRST <item> in <channel> below.
+    3. Commit + push this file.
+    4. Upload this file to niacin.dort.zone (replacing the previous copy).
+    5. Tag + gh release create as the script also prints.
+
+    The .zip referenced in each <enclosure> lives on the GitHub Release
+    for that tag. The EdDSA signature is verified by Sparkle against the
+    SUPublicEDKey baked into Info.plist.
+-->
+<rss version="2.0" xmlns:sparkle="http://www.andymatuschak.org/xml-namespaces/sparkle">
+    <channel>
+        <title>Niacin</title>
+        <link>https://niacin.dort.zone/appcast.xml</link>
+        <description>Niacin — keeps your Mac awake, built for the enterprise.</description>
+        <language>en</language>
+        <!--
+            Insert new <item> blocks here, newest first. Each release run of
+            scripts/release.sh prints one ready to paste.
+        -->
+    </channel>
+</rss>

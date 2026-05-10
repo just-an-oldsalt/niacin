@@ -1,4 +1,5 @@
 import SwiftUI
+import Sparkle
 
 struct SettingsView: View {
     @AppStorage("activateOnLaunch") private var activateOnLaunch = false
@@ -41,6 +42,34 @@ struct SettingsView: View {
                 )
             }
 
+            if let updater = appState.updater {
+                Section("Software Update") {
+                    let mdmDisabled = ManagedPreferences.disableAutoUpdate
+                    ManagedToggle(
+                        "Automatically check for updates",
+                        isOn: Binding(
+                            get: { updater.automaticallyChecksForUpdates && !mdmDisabled },
+                            set: { updater.automaticallyChecksForUpdates = $0 }
+                        ),
+                        managed: mdmDisabled ? false : nil
+                    )
+                    Picker("Check frequency", selection: Binding(
+                        get: { updater.updateCheckInterval },
+                        set: { updater.updateCheckInterval = $0 }
+                    )) {
+                        Text("Daily").tag(TimeInterval(86_400))
+                        Text("Weekly").tag(TimeInterval(86_400 * 7))
+                        Text("Monthly").tag(TimeInterval(86_400 * 30))
+                    }
+                    .disabled(mdmDisabled)
+                    HStack {
+                        Spacer()
+                        Button("Check Now") { updater.checkForUpdates() }
+                            .disabled(mdmDisabled)
+                    }
+                }
+            }
+
             if hasManagedPolicies {
                 Section("Managed by Organisation") {
                     if !ManagedPreferences.isEnabled {
@@ -65,6 +94,9 @@ struct SettingsView: View {
                     if ManagedPreferences.allowedDurations != nil {
                         PolicyRow("Available durations set by policy", icon: "list.bullet", tint: .secondary)
                     }
+                    if ManagedPreferences.disableAutoUpdate {
+                        PolicyRow("Auto-updates disabled by policy", icon: "lock.fill", tint: .orange)
+                    }
                 }
             }
         }
@@ -74,12 +106,13 @@ struct SettingsView: View {
     }
 
     private var hasManagedPolicies: Bool {
-        !ManagedPreferences.isEnabled          ||
-        !ManagedPreferences.allowUserToDisable ||
-        !ManagedPreferences.allowIndefinite    ||
+        !ManagedPreferences.isEnabled            ||
+        !ManagedPreferences.allowUserToDisable   ||
+        !ManagedPreferences.allowIndefinite      ||
         ManagedPreferences.maxDurationSeconds != nil ||
-        ManagedPreferences.disableQuit         ||
-        ManagedPreferences.allowedDurations != nil
+        ManagedPreferences.disableQuit           ||
+        ManagedPreferences.allowedDurations != nil ||
+        ManagedPreferences.disableAutoUpdate
     }
 }
 

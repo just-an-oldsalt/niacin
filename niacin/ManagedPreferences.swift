@@ -53,6 +53,11 @@ struct ManagedPreferences {
     // Remove Quit from the menu bar menu
     static var disableQuit: Bool             { bool("disableQuit") ?? false }
 
+    // Disable Sparkle auto-update entirely. When true: no background checks,
+    // the in-app "Check for Updates…" UI is hidden/locked. Most managed orgs
+    // push updates via JAMF and want to suppress self-updates.
+    static var disableAutoUpdate: Bool       { bool("disableAutoUpdate") ?? false }
+
     // Lock the display-sleep toggle; nil means user-controlled
     // When false, the display stays on (-d flag added to caffeinate)
     static var allowDisplaySleep: Bool?      { bool("allowDisplaySleep") }
