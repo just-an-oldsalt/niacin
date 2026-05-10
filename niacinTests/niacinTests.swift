@@ -431,3 +431,136 @@ struct AvailableDurationsTests {
         }
     }
 }
+
+// MARK: - AppState integration with the sleep-prevention engine
+//
+// SleepPreventerTests above proves the engine works. These prove the app's
+// glue around it works — activate goes through the right gates, deactivate
+// respects policy, and reloadPolicy auto-deactivates only when the new
+// policy is genuinely incompatible. Serialized because they share the
+// AppState.shared singleton and mutate kernel power assertions.
+
+@MainActor
+@Suite(.serialized)
+struct AppStateIntegrationTests {
+    private static func withPolicy(_ policy: [String: Any], _ body: () -> Void) {
+        let dir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("niacin-tests-\(UUID().uuidString)")
+        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: dir) }
+
+        let plist = dir.appendingPathComponent("p.plist")
+        (policy as NSDictionary).write(to: plist, atomically: true)
+
+        let original = ManagedPreferences.pathsProvider
+        defer { ManagedPreferences.pathsProvider = original }
+        ManagedPreferences.pathsProvider = { [plist.path] }
+
+        body()
+    }
+
+    private static func pmsetHoldsNiacinAssertion() -> Bool {
+        let task = Process()
+        task.executableURL = URL(fileURLWithPath: "/usr/bin/pmset")
+        task.arguments = ["-g", "assertions"]
+        let pipe = Pipe()
+        task.standardOutput = pipe
+        try? task.run()
+        task.waitUntilExit()
+        let output = String(data: pipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
+        let pid = ProcessInfo.processInfo.processIdentifier
+        return output.contains("pid \(pid)")
+            && output.contains("PreventUserIdleSystemSleep")
+    }
+
+    // Belt-and-braces: every test in this suite leaves AppState clean for
+    // the next test, even on failure.
+    private static func reset() {
+        AppState.shared.preventer.deactivate()
+    }
+
+    @Test func activateThroughAppStateHoldsAssertion() {
+        defer { Self.reset() }
+        Self.withPolicy([:]) {
+            let app = AppState.shared
+            app.activate(duration: .minutes(5))
+
+            #expect(app.preventer.isActive)
+            #expect(Self.pmsetHoldsNiacinAssertion())
+        }
+    }
+
+    @Test func userDeactivateIsBlockedWhenPolicyForbidsIt() {
+        defer { Self.reset() }
+        Self.withPolicy(["allowUserToDisable": false]) {
+            let app = AppState.shared
+            app.activate(duration: .minutes(5))
+            #expect(app.preventer.isActive)
+
+            app.deactivate()
+            #expect(app.preventer.isActive,
+                    "deactivate must be a no-op when allowUserToDisable=false")
+        }
+    }
+
+    @Test func activateBlockedWhenPolicyDisablesApp() {
+        defer { Self.reset() }
+        Self.withPolicy(["enabled": false]) {
+            let app = AppState.shared
+            app.activate(duration: .minutes(5))
+            #expect(app.preventer.isActive == false,
+                    "activate must be a no-op when enabled=false")
+        }
+    }
+
+    @Test func reloadPolicyDeactivatesWhenAppBecomesDisabled() {
+        defer { Self.reset() }
+        let app = AppState.shared
+
+        Self.withPolicy([:]) {
+            app.activate(duration: .minutes(5))
+            #expect(app.preventer.isActive)
+        }
+
+        Self.withPolicy(["enabled": false]) {
+            app.reloadPolicy()
+            #expect(app.preventer.isActive == false,
+                    "reloadPolicy must deactivate when policy flips isEnabled=false")
+        }
+    }
+
+    @Test func reloadPolicyLeavesCompatibleSessionRunning() {
+        defer { Self.reset() }
+        let app = AppState.shared
+
+        Self.withPolicy([:]) {
+            app.activate(duration: .minutes(5))
+            #expect(app.preventer.isActive)
+        }
+
+        // Push a policy that doesn't conflict with the running 5-minute session.
+        Self.withPolicy(["maxDurationSeconds": 3600]) {
+            app.reloadPolicy()
+            #expect(app.preventer.isActive,
+                    "compatible policy changes must not interrupt a running session")
+        }
+    }
+
+    @Test func reloadPolicyDeactivatesWhenSessionExceedsNewMax() {
+        defer { Self.reset() }
+        let app = AppState.shared
+
+        Self.withPolicy([:]) {
+            // Hour-long session.
+            app.activate(duration: .hours(1))
+            #expect(app.preventer.isActive)
+        }
+
+        // New policy: 1-minute max. The current session exceeds that.
+        Self.withPolicy(["maxDurationSeconds": 60]) {
+            app.reloadPolicy()
+            #expect(app.preventer.isActive == false,
+                    "reloadPolicy must deactivate when session exceeds new maxDurationSeconds")
+        }
+    }
+}
