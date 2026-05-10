@@ -248,7 +248,7 @@ then upload appcast.xml to https://niacin.dort.zone/appcast.xml :
             <pubDate>$PUBDATE</pubDate>
             <sparkle:version>$(grep -m1 "CURRENT_PROJECT_VERSION" "$PROJECT/project.pbxproj" | sed 's/.*= //;s/;//' | tr -d '[:space:]')</sparkle:version>
             <sparkle:shortVersionString>$VERSION</sparkle:shortVersionString>
-            <sparkle:minimumSystemVersion>13.0</sparkle:minimumSystemVersion>
+            <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
             <enclosure
                 url="https://github.com/just-an-oldsalt/niacin/releases/download/v$VERSION/niacin-$VERSION.zip"
                 length="$LENGTH"

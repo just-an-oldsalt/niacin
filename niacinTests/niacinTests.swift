@@ -237,12 +237,13 @@ struct ManagedPreferencesTests {
 // MARK: - SleepPreventer (IOKit-backed engine)
 
 @MainActor
+@Suite(.serialized)
 struct SleepPreventerTests {
     private static func pmsetAssertionsForThisProcess() -> String {
         // `pmset -g assertions` lists every process holding power assertions.
-        // We grep the output for our PID to verify Niacin's assertions are
-        // actually held by the kernel — proving the side-effect, not just
-        // that we ran the right code path.
+        // We filter to lines that mention our exact PID so we don't pick up
+        // assertions held by a parallel test or by AppState.shared (which
+        // shares the same process but is exercised by AppStateIntegrationTests).
         let task = Process()
         task.executableURL = URL(fileURLWithPath: "/usr/bin/pmset")
         task.arguments = ["-g", "assertions"]
@@ -254,7 +255,7 @@ struct SleepPreventerTests {
         let pid = ProcessInfo.processInfo.processIdentifier
         return output
             .components(separatedBy: "\n")
-            .filter { $0.contains("pid \(pid)") || $0.contains("Niacin") }
+            .filter { $0.contains("pid \(pid)(") }
             .joined(separator: "\n")
     }
 
@@ -469,8 +470,12 @@ struct AppStateIntegrationTests {
         task.waitUntilExit()
         let output = String(data: pipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
         let pid = ProcessInfo.processInfo.processIdentifier
-        return output.contains("pid \(pid)")
-            && output.contains("PreventUserIdleSystemSleep")
+        // Only consider lines that name our PID — pmset output may include
+        // assertions from other processes that we'd otherwise match.
+        return output
+            .components(separatedBy: "\n")
+            .filter { $0.contains("pid \(pid)(") }
+            .contains { $0.contains("PreventUserIdleSystemSleep") }
     }
 
     // Belt-and-braces: every test in this suite leaves AppState clean for
