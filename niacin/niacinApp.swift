@@ -44,7 +44,11 @@ struct NiacinApp: App {
                 .environment(appState)
         } label: {
             HStack(spacing: 4) {
-                Image(systemName: appState.preventer.isActive ? "cup.and.saucer.fill" : "cup.and.saucer")
+                Image(systemName:
+                    appState.preventer.lastError != nil ? "exclamationmark.triangle.fill" :
+                    appState.preventer.isActive ? "cup.and.saucer.fill" :
+                    "cup.and.saucer"
+                )
                 if let countdown = appState.countdownText {
                     Text(countdown)
                         .font(.system(size: 11, weight: .medium, design: .monospaced))

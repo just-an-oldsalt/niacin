@@ -74,7 +74,14 @@ final class AppState {
 
         log.info("activating: duration=\(duration.displayTitle, privacy: .public) allowDisplaySleep=\(effectiveAllowDisplaySleep, privacy: .public)")
         preventer.activate(duration: duration.timeInterval, allowDisplaySleep: effectiveAllowDisplaySleep)
-        startCountdownTimer(timed: duration.timeInterval != nil)
+        if let err = preventer.lastError {
+            // IOKit refused the assertion — surface it on the menu-bar tooltip
+            // so the user knows the click did something even though the icon
+            // didn't switch to the "active" state.
+            tooltipText = String(localized: "Niacin — Error: \(err)")
+        } else {
+            startCountdownTimer(timed: duration.timeInterval != nil)
+        }
     }
 
     func deactivate() {

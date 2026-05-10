@@ -98,13 +98,5 @@ Items that span streams or don't fit cleanly into one bucket.
 
 ## Code health
 
-- **Crash log forwarding** — at minimum, document where `os.Logger` output lands so IT can collect it
-- **Swift 6 strict-concurrency cleanup** — `PolicyWatcher.swift:31` warns that `self.onChange = onChange` loses the `@MainActor` annotation when crossing the `queue.async` boundary. Cosmetic warning today (build/notarize succeed) but will be a hard error when the project flips to Swift 6 language mode. Fix: annotate the `onChange` storage and the `start(onChange:)` parameter as `@Sendable @MainActor` so the types match exactly across the dispatch boundary.
 - **Don't re-enable App Sandbox without a plan for Sparkle** — `ENABLE_APP_SANDBOX = NO` was set in v1.5 because sandboxed Sparkle can't acquire the admin rights needed to replace `/Applications/Niacin.app`. Re-enabling sandbox requires either restricting installs to `~/Applications` (UX hostile) or shipping an SMJobBless privileged helper (days of work). If a future App Store distribution is needed, that's a parallel build target, not a flip of this flag.
-- **`RELEASING.md` polish** — the per-release runbook predates the Sparkle work; should be updated to (a) call out the niacin-web mirror step explicitly, (b) note the sandbox-off posture so it's not accidentally re-enabled in some future Xcode build-settings refactor, (c) add the `xattr -dr com.apple.quarantine` reminder for anyone testing local installs from `.zip`.
-
-### Engine robustness (the core sleep mechanism)
-
-The big-ticket items here shipped in v1.7: caffeinate replaced with direct IOKit `IOPMAssertion` calls, and the test gap on the engine is now closed with `SleepPreventerTests` (5 unit tests via `pmset -g assertions` introspection) plus `AppStateIntegrationTests` (6 tests covering the activate/deactivate/reloadPolicy glue). One item remains:
-
-- **Detect-and-surface engine failure** — when `IOPMAssertionCreateWithName` returns non-success (rare, but possible under restrictive sandbox profiles or future macOS releases), Niacin currently logs the error but the user sees nothing — the menu briefly looks active and then resets. Surface it visibly: menu icon shows an error state, tooltip says "Niacin can't prevent sleep — check with IT", audit log records the specific `IOReturn` code. (S)
+- **Info.plist double-listed in Copy Bundle Resources** — Xcode warns at build time that `niacin/Info.plist` is both `INFOPLIST_FILE` and a member of the synchronized resources group. The file ends up in both `Contents/Info.plist` (correct) and `Contents/Resources/Info.plist` (cosmetic duplicate). Fix is a `membershipExceptions` entry on the `PBXFileSystemSynchronizedRootGroup` in `project.pbxproj`. Non-blocking; the bundle is correct, just slightly larger than necessary. (S)

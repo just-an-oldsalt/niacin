@@ -15,7 +15,7 @@ final class PolicyWatcher {
     private var pollTimer: DispatchSourceTimer?
     private var lastModDates: [String: Date] = [:]
     private var debounceWorkItem: DispatchWorkItem?
-    private var onChange: (@MainActor () -> Void)?
+    private var onChange: (@MainActor @Sendable () -> Void)?
 
     private let paths: [String] = {
         let bundleID = Bundle.main.bundleIdentifier ?? "com.oldsalt.niacin"
@@ -25,10 +25,15 @@ final class PolicyWatcher {
         ]
     }()
 
-    func start(onChange: @escaping @MainActor () -> Void) {
+    func start(onChange: @escaping @MainActor @Sendable () -> Void) {
+        // Assign onChange before dispatching so we don't capture a @MainActor
+        // closure into a non-MainActor closure body (which would strip the
+        // global-actor annotation under Swift 6). The property's storage is
+        // safe to write here: source.resume() inside installWatch acts as a
+        // memory barrier before any queue work can fire and read onChange.
+        self.onChange = onChange
         queue.async { [weak self] in
             guard let self else { return }
-            self.onChange = onChange
             for path in self.paths {
                 self.installWatch(path: path)
                 self.lastModDates[path] = self.currentModDate(path)

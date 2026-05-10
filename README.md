@@ -206,6 +206,69 @@ macOS will write the plist to `/Library/Managed Preferences/` and Niacin will pi
 
 ---
 
+## Logging & Diagnostics
+
+Niacin logs all state-changing events and diagnostic information to macOS's unified logging system via Swift's `os.Logger` under the subsystem `com.oldsalt.niacin`. IT admins can extract, filter, and analyze these logs for troubleshooting, compliance audits, and fleet monitoring.
+
+### Quick extraction
+
+To dump the last hour of Niacin logs for a support ticket:
+
+```
+log show --predicate 'subsystem == "com.oldsalt.niacin"' --info --last 1h
+```
+
+Include `--debug` to also capture debug-level tracing (normally suppressed):
+
+```
+log show --predicate 'subsystem == "com.oldsalt.niacin"' --info --debug --last 1h
+```
+
+### Live tailing
+
+For active troubleshooting, watch logs in real time:
+
+```
+log stream --predicate 'subsystem == "com.oldsalt.niacin"' --info
+```
+
+### Filter by category
+
+Each log message belongs to a category. To view only policy events over the last 24 hours:
+
+```
+log show --predicate 'subsystem == "com.oldsalt.niacin" && category == "policy"' --info --last 24h
+```
+
+### Fleet collection and archival
+
+Use `log collect` to capture a timestamped archive that can be transferred for central analysis:
+
+```
+log collect --last 7d --output /tmp/niacin-diag.logarchive
+```
+
+Then open the archive on another machine with:
+
+```
+log show --archive /tmp/niacin-diag.logarchive --predicate 'subsystem == "com.oldsalt.niacin"'
+```
+
+### Log categories
+
+| Category | Contains | Useful for |
+|---|---|---|
+| `policy` | activate/deactivate events, policy enforcement decisions, policy-blocked actions, session termination reasons | audit trail, verifying policy enforcement |
+| `policy-watcher` | file system events on managed plist paths, live-reload notifications | confirming policy pushes are reaching the device |
+| `managed-prefs` | managed-preference key reads, parse errors | diagnosing malformed .mobileconfig or unexpected key values |
+| `sleep-preventer` | IOKit assertion lifecycle (acquired/released), IOReturn error codes | confirming sleep-prevention engine is operational |
+
+### Retention and SIEM integration
+
+macOS retains unified log output for approximately 7 days by default. For longer retention, use `log collect` to create persistent archives, or configure a SIEM agent (CrowdStrike Falcon, Splunk, etc.) to ingest the unified log directly. SIEM forwarding is not managed by Niacin itself.
+
+---
+
 ## Settings window
 
 The settings window reflects the current policy state:
