@@ -78,6 +78,7 @@ Any key present in the managed domain overrides the user's preference and locks 
 | `deactivateOnUserSwitch` | Bool | *(user)* | Deactivate automatically on fast user switch |
 | `maxDurationSeconds` | Integer | *(none)* | Hard cap on any single activation (seconds) |
 | `allowedDurations` | Array of Integer | *(defaults)* | Override the available duration list entirely |
+| `disableAutoUpdate` | Bool | `false` | Disable Sparkle auto-update entirely. When `true`: no background checks, the in-app "Check for Updates…" UI is hidden, the Settings toggle is locked. Most managed orgs push updates via JAMF and want to suppress self-updates |
 
 ### Example plist
 
@@ -130,9 +131,36 @@ A typical enterprise deployment that keeps the system awake but enforces screen 
     <key>allowIndefinite</key>
     <false/>
 
+    <!-- IT pushes updates via JAMF; users cannot self-update -->
+    <key>disableAutoUpdate</key>
+    <true/>
+
 </dict>
 </plist>
 ```
+
+### Auto-update lockdown only
+
+If you only need to disable Sparkle's self-update mechanism (because IT pushes builds via JAMF / Munki / Intune) and want to leave every other setting under user control:
+
+```xml
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+  "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>disableAutoUpdate</key>
+    <true/>
+</dict>
+</plist>
+```
+
+When this key is set, Niacin will:
+
+- Skip background update checks entirely
+- Hide the "Check for Updates…" item from the menu bar menu
+- Lock the "Automatically check for updates" toggle in Settings (with an "Auto-updates disabled by policy" indicator in the Managed-by-Organisation section)
+- React to the policy live via the file watcher — flipping the key on or off in the deployed plist takes effect within ~200 ms without restarting the app
 
 ### Kiosk / display mode example
 

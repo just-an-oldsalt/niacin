@@ -25,12 +25,6 @@ Audit found mixed casing. Decide on **Niacin** as the canonical proper-noun spel
 ---
 
 ## Functional
-- **Auto-update** — Sparkle 2 is the de-facto standard for macOS menu bar apps
-  - Host an `appcast.xml` (GitHub Releases works fine as the backing store via a generated feed)
-  - Generate an EdDSA key pair; ship the public key in `Info.plist`, keep the private key off-repo
-  - Add an "Automatically check for updates" toggle in Settings, plus a "Check now" button
-  - **MDM-lockable**: most managed orgs will want updates pushed via JAMF, not self-updates — add a `disableAutoUpdate` managed key (defaults to on for unmanaged installs, off-able by IT)
-  - Notarize each release; Sparkle requires signed + notarized updates to apply silently
 - **Global hotkey to toggle** — quick activation without opening the menu (configurable, MDM-lockable)
 - **Custom user durations** — let users add their own preset alongside the defaults (still subject to `maxDurationSeconds`)
 - **Auto-deactivate on battery / low battery** — common request for laptop users; trivial via `IOPSCopyPowerSourcesInfo`
@@ -54,3 +48,5 @@ Audit found mixed casing. Decide on **Niacin** as the canonical proper-noun spel
 ## Code health
 - **Crash log forwarding** — at minimum, document where `os.Logger` output lands so IT can collect it
 - **Swift 6 strict-concurrency cleanup** — `PolicyWatcher.swift:31` warns that `self.onChange = onChange` loses the `@MainActor` annotation when crossing the `queue.async` boundary. Cosmetic warning today (build/notarize succeed) but will be a hard error when the project flips to Swift 6 language mode. Fix: annotate the `onChange` storage and the `start(onChange:)` parameter as `@Sendable @MainActor` so the types match exactly across the dispatch boundary.
+- **Don't re-enable App Sandbox without a plan for Sparkle** — `ENABLE_APP_SANDBOX = NO` was set in v1.5 because sandboxed Sparkle can't acquire the admin rights needed to replace `/Applications/Niacin.app`. Re-enabling sandbox requires either restricting installs to `~/Applications` (UX hostile) or shipping an SMJobBless privileged helper (days of work). If a future App Store distribution is needed, that's a parallel build target, not a flip of this flag.
+- **`RELEASING.md` polish** — the per-release runbook in `RELEASING.md` predates the Sparkle work; should be updated to (a) call out the niacin-web mirror step explicitly, (b) note the sandbox-off posture so it's not accidentally re-enabled in some future Xcode build-settings refactor, (c) add the `xattr -dr com.apple.quarantine` reminder for anyone testing local installs from `.zip`.
