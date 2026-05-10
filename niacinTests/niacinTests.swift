@@ -234,6 +234,107 @@ struct ManagedPreferencesTests {
     }
 }
 
+// MARK: - SleepPreventer (IOKit-backed engine)
+
+@MainActor
+struct SleepPreventerTests {
+    private static func pmsetAssertionsForThisProcess() -> String {
+        // `pmset -g assertions` lists every process holding power assertions.
+        // We grep the output for our PID to verify Niacin's assertions are
+        // actually held by the kernel — proving the side-effect, not just
+        // that we ran the right code path.
+        let task = Process()
+        task.executableURL = URL(fileURLWithPath: "/usr/bin/pmset")
+        task.arguments = ["-g", "assertions"]
+        let pipe = Pipe()
+        task.standardOutput = pipe
+        try? task.run()
+        task.waitUntilExit()
+        let output = String(data: pipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
+        let pid = ProcessInfo.processInfo.processIdentifier
+        return output
+            .components(separatedBy: "\n")
+            .filter { $0.contains("pid \(pid)") || $0.contains("Niacin") }
+            .joined(separator: "\n")
+    }
+
+    @Test func indefiniteFullAwakeHoldsBothAssertions() {
+        let preventer = SleepPreventer()
+        preventer.activate(duration: nil, allowDisplaySleep: false)
+        defer { preventer.deactivate() }
+
+        #expect(preventer.isActive)
+        #expect(preventer.activeUntil == nil)
+        #expect(preventer.isAllowingDisplaySleep == false)
+
+        let held = Self.pmsetAssertionsForThisProcess()
+        #expect(held.contains("PreventUserIdleSystemSleep"))
+        #expect(held.contains("PreventUserIdleDisplaySleep"))
+    }
+
+    @Test func allowDisplaySleepHoldsSystemAssertionOnly() {
+        let preventer = SleepPreventer()
+        preventer.activate(duration: nil, allowDisplaySleep: true)
+        defer { preventer.deactivate() }
+
+        #expect(preventer.isActive)
+        #expect(preventer.isAllowingDisplaySleep == true)
+
+        let held = Self.pmsetAssertionsForThisProcess()
+        #expect(held.contains("PreventUserIdleSystemSleep"))
+        // Display assertion explicitly NOT held in this mode.
+        #expect(!held.contains("PreventUserIdleDisplaySleep"))
+    }
+
+    @Test func deactivateReleasesAssertions() {
+        let preventer = SleepPreventer()
+        preventer.activate(duration: nil, allowDisplaySleep: false)
+        preventer.deactivate()
+
+        #expect(preventer.isActive == false)
+        #expect(preventer.activeUntil == nil)
+        #expect(preventer.isAllowingDisplaySleep == false)
+
+        let held = Self.pmsetAssertionsForThisProcess()
+        // Both Niacin assertions should be gone after deactivate.
+        #expect(!held.contains("PreventUserIdleSystemSleep"))
+        #expect(!held.contains("PreventUserIdleDisplaySleep"))
+    }
+
+    @Test func timedActivationSetsActiveUntilWithinTolerance() {
+        let preventer = SleepPreventer()
+        let before = Date()
+        preventer.activate(duration: 60, allowDisplaySleep: false)
+        defer { preventer.deactivate() }
+
+        #expect(preventer.activeUntil != nil)
+        if let until = preventer.activeUntil {
+            let delta = until.timeIntervalSince(before)
+            #expect(delta >= 59 && delta <= 61)
+        }
+    }
+
+    @Test func reactivateReplacesPriorAssertions() {
+        // Calling activate twice should release the old assertions before
+        // creating new ones — no leaks across reactivation.
+        let preventer = SleepPreventer()
+        preventer.activate(duration: nil, allowDisplaySleep: false)
+        preventer.activate(duration: nil, allowDisplaySleep: true)
+        defer { preventer.deactivate() }
+
+        #expect(preventer.isAllowingDisplaySleep == true)
+
+        let held = Self.pmsetAssertionsForThisProcess()
+        // Should be exactly one PreventUserIdleSystemSleep entry held by us,
+        // not two stacked ones from leaked activation.
+        let systemCount = held
+            .components(separatedBy: "\n")
+            .filter { $0.contains("PreventUserIdleSystemSleep") }
+            .count
+        #expect(systemCount == 1)
+    }
+}
+
 // MARK: - AppState.availableDurations filtering
 
 @MainActor

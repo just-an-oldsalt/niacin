@@ -99,6 +99,8 @@ final class AppState {
         guard !hasLaunched else { return }
         hasLaunched = true
 
+        sweepOrphanCaffeinate()
+
         let shouldActivate = ManagedPreferences.activateOnLaunch
             ?? UserDefaults.standard.bool(forKey: "activateOnLaunch")
         if shouldActivate && ManagedPreferences.isEnabled, let first = availableDurations.first {
@@ -113,6 +115,28 @@ final class AppState {
         )
 
         startPolicyWatcher()
+    }
+
+    // One-shot cleanup for users upgrading from pre-v1.7 builds. Older
+    // versions spawned `caffeinate` children that survived parent death and
+    // leaked power assertions across crashes / Sparkle updates / Force Quits.
+    // We kill any caffeinates still parented to launchd (PID 1) — those are
+    // orphans by definition. Caffeinates the user spawned themselves in a
+    // terminal have the shell as parent and are left alone.
+    //
+    // From v1.7 onwards Niacin doesn't spawn caffeinate at all, so this only
+    // matters during the upgrade transition. Safe to remove in a later release.
+    private func sweepOrphanCaffeinate() {
+        let task = Process()
+        task.executableURL = URL(fileURLWithPath: "/bin/sh")
+        task.arguments = ["-c", "pgrep -P 1 -x caffeinate | xargs -r kill 2>/dev/null"]
+        do {
+            try task.run()
+            task.waitUntilExit()
+            log.info("orphan caffeinate sweep complete (status \(task.terminationStatus, privacy: .public))")
+        } catch {
+            log.error("orphan caffeinate sweep failed: \(error.localizedDescription, privacy: .public)")
+        }
     }
 
     @objc private func sessionResigned() {
