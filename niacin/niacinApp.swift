@@ -105,7 +105,7 @@ struct NiacinApp: App {
             HStack(spacing: 4) {
                 Image(systemName:
                     appState.preventer.lastError != nil ? "exclamationmark.triangle.fill" :
-                    appState.preventer.isActive ? "cup.and.saucer.fill" :
+                    appState.isKeepingAwake ? "cup.and.saucer.fill" :
                     "cup.and.saucer"
                 )
                 if let countdown = appState.countdownText {

@@ -79,6 +79,55 @@ struct ManagedPreferences {
         return ints.isEmpty ? nil : ints
     }
 
+    // ─── Force-active triggers (v2.0) ──────────────────────────────────
+    //
+    // Three independent process-name watch lists. When any matches a
+    // running process, Niacin silently force-activates regardless of
+    // whether the user has a session of their own. Process names are
+    // matched case-insensitively as substrings against kinfo_proc's
+    // p_comm (kernel-limited to 16 chars). Watch needles must fit.
+
+    // IT-managed list of deploy daemons (jamf, installd, softwareupdated,
+    // munki, IntuneMdmAgent, mdmclient, Installer, etc.). The use case is
+    // "don't sleep mid-deploy while JAMF pushes overnight". Empty array by
+    // default — IT must opt in by specifying processes.
+    static var forceActiveDuringDeploys: [String] {
+        (managedValue("forceActiveDuringDeploys") as? [Any])?
+            .compactMap { $0 as? String } ?? []
+    }
+
+    // IT or user-managed list of arbitrary apps that should keep the
+    // device awake while running (Zoom, Teams, OBS, etc.). Empty array
+    // by default.
+    static var forceActiveDuringApps: [String] {
+        (managedValue("forceActiveDuringApps") as? [Any])?
+            .compactMap { $0 as? String } ?? []
+    }
+
+    // Whether to auto-detect known AI runtimes (Ollama, LM Studio,
+    // llama.cpp server, ComfyUI, etc.) and keep the device awake while
+    // they're loaded. The list is hardcoded (see defaultAIRuntimeProcesses);
+    // managed admins can disable detection by setting this to false.
+    // Default: true (most Niacin users on Apple Silicon Macs are exactly
+    // the audience that benefits from this).
+    static var aiRuntimeAutoAwake: Bool { bool("aiRuntimeAutoAwake") ?? true }
+
+    // Known local-AI runtime process names. Case-insensitive substring
+    // match against p_comm. Truncation-aware — names that the kernel
+    // would chop are entered in their post-truncation form.
+    static let defaultAIRuntimeProcesses: [String] = [
+        "ollama",
+        "LM Studio",
+        "llama-server",
+        "mlx-lm",
+        "mlx_lm.server",
+        "ComfyUI",
+        "InvokeAI",
+        "stable-diffu",       // stable-diffusion-webui, truncated
+        "mistralrs",          // mistralrs-server, truncated
+        "vllm",
+    ]
+
     // True only if the key is set in a managed preferences plist (vs. user
     // defaults) — drives lock icons.
     static func isManaged(key: String) -> Bool {

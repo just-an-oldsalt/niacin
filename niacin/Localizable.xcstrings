@@ -1374,6 +1374,41 @@
         }
       }
     },
+    "Niacin — Active for %@": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Niacin — Aktiv für %@"
+          }
+        },
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Niacin — Active for %@"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Niacin — Activo para %@"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Niacin — Actif pour %@"
+          }
+        },
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Niacin — Attivo per %@"
+          }
+        }
+      }
+    },
     "Niacin — Error: %@": {
       "extractionState": "manual",
       "localizations": {

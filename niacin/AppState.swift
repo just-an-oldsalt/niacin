@@ -1,9 +1,11 @@
 import Foundation
 import AppKit
 import OSLog
+import IOKit.pwr_mgt
 import Sparkle
 
 private let log = Logger(subsystem: "com.oldsalt.niacin", category: "policy")
+private let auditLog = Logger(subsystem: "com.oldsalt.niacin", category: "audit")
 
 @Observable
 @MainActor
@@ -15,6 +17,35 @@ final class AppState {
     private var countdownTimer: Timer?
     private let policyWatcher = PolicyWatcher()
     private(set) var updater: SPUUpdater?
+
+    // ─── Force-active state (v2.0) ─────────────────────────────────────
+    //
+    // Three independent ProcessWatchers feed into one set of IOKit power
+    // assertions held by AppState itself (separate from the user-session
+    // assertions held by `preventer`). When any watcher has matches, the
+    // force-active assertion is held; macOS composes both assertion pairs
+    // so the system stays awake whether the user activated manually OR a
+    // watcher matched, OR both.
+    private var deployWatcher: ProcessWatcher?
+    private var appWatcher: ProcessWatcher?
+    private var aiWatcher: ProcessWatcher?
+
+    private(set) var deployMatches: Set<String> = []
+    private(set) var appMatches: Set<String> = []
+    private(set) var aiRuntimeMatches: Set<String> = []
+
+    private var forceActiveSystemAssertion: IOPMAssertionID = 0
+    private var forceActiveDisplayAssertion: IOPMAssertionID = 0
+
+    var hasForceActive: Bool {
+        !deployMatches.isEmpty || !appMatches.isEmpty || !aiRuntimeMatches.isEmpty
+    }
+
+    // True if Niacin is keeping the system awake for *any* reason — user
+    // session or force-active watcher. Drives the menu-bar icon state.
+    var isKeepingAwake: Bool {
+        preventer.isActive || hasForceActive
+    }
 
     // Drives the menu bar countdown label; nil when inactive or indefinite
     private(set) var countdownText: String? = nil
@@ -73,6 +104,7 @@ final class AppState {
         let effectiveAllowDisplaySleep = allowDisplaySleep && !preventDeviceLock
 
         log.info("activating: duration=\(duration.displayTitle, privacy: .public) allowDisplaySleep=\(effectiveAllowDisplaySleep, privacy: .public)")
+        auditLog.info("activation: source=user duration=\(duration.displayTitle, privacy: .public) allowDisplaySleep=\(effectiveAllowDisplaySleep, privacy: .public)")
         preventer.activate(duration: duration.timeInterval, allowDisplaySleep: effectiveAllowDisplaySleep)
         if let err = preventer.lastError {
             // IOKit refused the assertion — surface it on the menu-bar tooltip
@@ -90,8 +122,10 @@ final class AppState {
             return
         }
         log.info("deactivating (user request)")
+        auditLog.info("deactivation: source=user")
         preventer.deactivate()
         stopCountdownTimer()
+        updateTooltipForForceActive()  // refresh in case force-active is still running
     }
 
     func toggle() {
@@ -107,10 +141,12 @@ final class AppState {
         hasLaunched = true
 
         sweepOrphanCaffeinate()
+        startProcessWatchers()
 
         let shouldActivate = ManagedPreferences.activateOnLaunch
             ?? UserDefaults.standard.bool(forKey: "activateOnLaunch")
         if shouldActivate && ManagedPreferences.isEnabled, let first = availableDurations.first {
+            auditLog.info("activation: source=launch duration=\(first.displayTitle, privacy: .public)")
             activate(duration: first)
         }
 
@@ -122,6 +158,124 @@ final class AppState {
         )
 
         startPolicyWatcher()
+    }
+
+    // ─── Force-active watchers (v2.0) ──────────────────────────────────
+
+    private func startProcessWatchers() {
+        deployWatcher = ProcessWatcher(
+            name: "deploy",
+            needlesProvider: { ManagedPreferences.forceActiveDuringDeploys }
+        ) { [weak self] matches in
+            self?.handleWatcherChange(reason: "deploy", matches: matches)
+        }
+        deployWatcher?.start()
+
+        appWatcher = ProcessWatcher(
+            name: "apps",
+            needlesProvider: { ManagedPreferences.forceActiveDuringApps }
+        ) { [weak self] matches in
+            self?.handleWatcherChange(reason: "app", matches: matches)
+        }
+        appWatcher?.start()
+
+        aiWatcher = ProcessWatcher(
+            name: "ai-runtime",
+            needlesProvider: {
+                ManagedPreferences.aiRuntimeAutoAwake
+                    ? ManagedPreferences.defaultAIRuntimeProcesses
+                    : []
+            }
+        ) { [weak self] matches in
+            self?.handleWatcherChange(reason: "ai-runtime", matches: matches)
+        }
+        aiWatcher?.start()
+    }
+
+    private func handleWatcherChange(reason: String, matches: Set<String>) {
+        switch reason {
+        case "deploy":     deployMatches = matches
+        case "app":        appMatches = matches
+        case "ai-runtime": aiRuntimeMatches = matches
+        default: return
+        }
+
+        // Structured audit-log entry that IT can grep for via `log show`.
+        if matches.isEmpty {
+            auditLog.info("force-active end: reason=\(reason, privacy: .public)")
+        } else {
+            auditLog.info("force-active begin: reason=\(reason, privacy: .public) matches=\(matches.sorted(), privacy: .public)")
+        }
+
+        recomputeForceActiveAssertion()
+        updateTooltipForForceActive()
+    }
+
+    // Hold IOKit assertions for force-active reasons. These are independent
+    // of the user-session assertions held by `preventer` — macOS composes
+    // both pairs, so the system stays awake whenever EITHER pair is held.
+    // When the user's session ends, force-active stays in place; when
+    // force-active drops, the user's session is unaffected.
+    private func recomputeForceActiveAssertion() {
+        if hasForceActive {
+            // Acquire (idempotent — release first if already held).
+            if forceActiveSystemAssertion == 0 {
+                let reason = "Niacin force-active (deploy / app / AI runtime)" as CFString
+                var sys: IOPMAssertionID = 0
+                let r1 = IOPMAssertionCreateWithName(
+                    kIOPMAssertionTypePreventUserIdleSystemSleep as CFString,
+                    IOPMAssertionLevel(kIOPMAssertionLevelOn),
+                    reason, &sys
+                )
+                if r1 == kIOReturnSuccess {
+                    forceActiveSystemAssertion = sys
+                } else {
+                    log.error("force-active system assertion failed: \(r1, privacy: .public)")
+                }
+
+                var disp: IOPMAssertionID = 0
+                let r2 = IOPMAssertionCreateWithName(
+                    kIOPMAssertionTypePreventUserIdleDisplaySleep as CFString,
+                    IOPMAssertionLevel(kIOPMAssertionLevelOn),
+                    reason, &disp
+                )
+                if r2 == kIOReturnSuccess {
+                    forceActiveDisplayAssertion = disp
+                } else {
+                    log.error("force-active display assertion failed: \(r2, privacy: .public)")
+                }
+                log.info("force-active engaged")
+            }
+        } else {
+            // Release.
+            if forceActiveSystemAssertion != 0 {
+                IOPMAssertionRelease(forceActiveSystemAssertion)
+                forceActiveSystemAssertion = 0
+            }
+            if forceActiveDisplayAssertion != 0 {
+                IOPMAssertionRelease(forceActiveDisplayAssertion)
+                forceActiveDisplayAssertion = 0
+            }
+            log.info("force-active released")
+        }
+    }
+
+    private func updateTooltipForForceActive() {
+        // Only override the tooltip when no user session is running. When
+        // both user + force are active, the user session's tooltip wins
+        // (it has more specific information like remaining time).
+        guard !preventer.isActive else { return }
+
+        if hasForceActive {
+            let sources: [String] = [
+                deployMatches.isEmpty ? nil : "deploy",
+                appMatches.isEmpty ? nil : "app",
+                aiRuntimeMatches.isEmpty ? nil : "AI",
+            ].compactMap { $0 }
+            tooltipText = String(localized: "Niacin — Active for \(sources.joined(separator: ", "))")
+        } else {
+            tooltipText = String(localized: "Niacin — Inactive")
+        }
     }
 
     // One-shot cleanup for users upgrading from pre-v1.7 builds. Older

@@ -79,6 +79,9 @@ Any key present in the managed domain overrides the user's preference and locks 
 | `maxDurationSeconds` | Integer | *(none)* | Hard cap on any single activation (seconds) |
 | `allowedDurations` | Array of Integer | *(defaults)* | Override the available duration list entirely |
 | `disableAutoUpdate` | Bool | `false` | Disable Sparkle auto-update entirely. When `true`: no background checks, the in-app "Check for Updates…" UI is hidden, the Settings toggle is locked. Most managed orgs push updates via JAMF and want to suppress self-updates |
+| `forceActiveDuringDeploys` | Array of String | *(empty)* | Process-name patterns that, when matched against a running process, force Niacin awake silently. Designed for IT-deploy daemons (`jamf`, `installd`, `softwareupdated`, `munki`, `IntuneMdmAgent`, `mdmclient`, `Installer`) — the device won't sleep mid-deploy even if the user is away. Polled every 5 seconds. Names are case-insensitive substring matches against `kinfo_proc.p_comm`, kernel-limited to 16 chars |
+| `forceActiveDuringApps` | Array of String | *(empty)* | Same shape as `forceActiveDuringDeploys` but for general apps (`zoom.us`, `OBS`, `obs-studio`, etc.). Force-activates while any matching process is running |
+| `aiRuntimeAutoAwake` | Bool | `true` | Auto-detect known local-AI runtimes (Ollama, LM Studio, llama.cpp server, MLX, ComfyUI, InvokeAI, Stable Diffusion WebUI, vLLM, etc.) and force-activate while any is loaded. Most M-series Mac mini AI workstation owners want this on; can be set `false` to opt out |
 
 ### Example plist
 
