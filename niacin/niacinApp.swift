@@ -111,6 +111,7 @@ struct NiacinApp: App {
                 if let countdown = appState.countdownText {
                     Text(countdown)
                         .font(.system(size: 11, weight: .medium, design: .monospaced))
+                        .foregroundStyle(appState.isExpiringSoon ? Color.orange : Color.primary)
                 } else if appState.preventer.isActive {
                     Text("∞")
                         .font(.system(size: 11, weight: .medium))

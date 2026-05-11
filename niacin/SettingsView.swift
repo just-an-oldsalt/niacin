@@ -6,6 +6,7 @@ struct SettingsView: View {
     @AppStorage("allowDisplaySleep") private var allowDisplaySleep = false
     @AppStorage("preventDeviceLock") private var preventDeviceLock = false
     @AppStorage("deactivateOnUserSwitch") private var deactivateOnUserSwitch = false
+    @AppStorage("warnSoundOnExpiry") private var warnSoundOnExpiry = false
 
     @State private var appState = AppState.shared
 
@@ -40,6 +41,8 @@ struct SettingsView: View {
                     isOn: $deactivateOnUserSwitch,
                     managed: ManagedPreferences.deactivateOnUserSwitch
                 )
+                Toggle("Play a sound 30 seconds before a timed session ends",
+                       isOn: $warnSoundOnExpiry)
             }
 
             if let updater = appState.updater {

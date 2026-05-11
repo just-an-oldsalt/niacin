@@ -49,6 +49,11 @@ final class AppState {
 
     // Drives the menu bar countdown label; nil when inactive or indefinite
     private(set) var countdownText: String? = nil
+    // True while a timed session has ≤30 seconds remaining. Drives the
+    // gentle-warning UX: countdown text turns orange and an optional sound
+    // (UserDefaults `warnSoundOnExpiry`) plays once at the threshold.
+    private(set) var isExpiringSoon: Bool = false
+    private var beepedForCurrentSession: Bool = false
     // Drives the menu bar tooltip
     private(set) var tooltipText: String = String(localized: "Niacin — Inactive")
     // Incremented on every policy reload; views read this via .id(...) to force
@@ -324,22 +329,46 @@ final class AppState {
         countdownTimer?.invalidate()
         countdownTimer = nil
         countdownText = nil
-        tooltipText = String(localized: "Niacin — Inactive")
+        isExpiringSoon = false
+        beepedForCurrentSession = false
+        // If force-active is keeping us awake even after the user session
+        // ends, leave the tooltip in its force-active form. Only reset to
+        // "Inactive" when nothing is keeping the system awake.
+        if hasForceActive {
+            updateTooltipForForceActive()
+        } else {
+            tooltipText = String(localized: "Niacin — Inactive")
+        }
     }
 
     private func updateCountdown() {
         guard preventer.isActive else { stopCountdownTimer(); return }
         guard let until = preventer.activeUntil else {
             countdownText = nil
+            isExpiringSoon = false
             tooltipText = String(localized: "Niacin — Keeping you awake")
             return
         }
         let remaining = Int(until.timeIntervalSinceNow)
         guard remaining > 0 else {
             countdownText = nil
+            isExpiringSoon = false
             tooltipText = String(localized: "Niacin — Keeping you awake")
             return
         }
+
+        // Gentle countdown warning: ≤30s remaining flips isExpiringSoon
+        // (drives orange-text styling in the menu bar) and plays a beep
+        // once if the user opted into the sound preference.
+        let nowExpiring = remaining <= 30
+        if nowExpiring && !isExpiringSoon && !beepedForCurrentSession {
+            if UserDefaults.standard.bool(forKey: "warnSoundOnExpiry") {
+                NSSound.beep()
+            }
+            beepedForCurrentSession = true
+        }
+        isExpiringSoon = nowExpiring
+
         let formatted = Self.format(seconds: remaining)
         countdownText = formatted
         tooltipText = String(localized: "Niacin — \(formatted) remaining")
