@@ -206,6 +206,49 @@ macOS will write the plist to `/Library/Managed Preferences/` and Niacin will pi
 
 ---
 
+## Automation
+
+Niacin registers a `niacin://` URL scheme. Any tool that can `open` a URL (the shell, Shortcuts, Calendar reminders, Stream Deck, webhooks, Hammerspoon) can drive activation and deactivation without scripting against the menu UI.
+
+### URL scheme
+
+```sh
+# Activate indefinitely
+open "niacin://activate"
+
+# Activate for 30 minutes (1800 seconds)
+open "niacin://activate?duration=1800"
+
+# Activate indefinitely (explicit)
+open "niacin://activate?duration=indefinite"
+
+# Deactivate the current session
+open "niacin://deactivate"
+```
+
+URL-driven activations honour every managed-preferences guard (`enabled`, `allowIndefinite`, `maxDurationSeconds`, etc.) — IT-managed installs can lock down what URL-scheme callers are allowed to do, same as the menu UI.
+
+### `niacin run -- <command>`
+
+Convenience wrapper that activates Niacin for the duration of a command and deactivates when it exits — clean, errored, or Ctrl+C'd:
+
+```sh
+niacin run -- make build
+niacin run -- xcodebuild test -scheme MyApp
+niacin run -- bash -c 'sleep 3600 && say "done"'
+```
+
+Install the wrapper into your `$PATH`:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/just-an-oldsalt/niacin/main/scripts/niacin -o /usr/local/bin/niacin
+chmod +x /usr/local/bin/niacin
+```
+
+The wrapper currently only supports the `run` subcommand. A full Swift CLI (`niacin status`, `niacin activate 30m`, `niacin watch <pid>`) is planned for v2.1; the `run` shape will stay stable so existing scripts continue to work.
+
+---
+
 ## Logging & Diagnostics
 
 Niacin logs all state-changing events and diagnostic information to macOS's unified logging system via Swift's `os.Logger` under the subsystem `com.oldsalt.niacin`. IT admins can extract, filter, and analyze these logs for troubleshooting, compliance audits, and fleet monitoring.

@@ -1,0 +1,100 @@
+#!/bin/bash
+# niacin — a thin wrapper around the niacin:// URL scheme that the app
+# registers. Currently exposes one subcommand:
+#
+#     niacin run -- <cmd> [args...]
+#
+# This activates Niacin (indefinite duration), runs the command, and
+# deactivates Niacin when the command exits — whether cleanly, with an
+# error, or via Ctrl+C / SIGTERM. The trap ensures we always release
+# the kernel power assertion.
+#
+# Future subcommands (v2.1+) will land as a proper Swift binary:
+# `niacin status`, `niacin activate 30m`, `niacin deactivate`,
+# `niacin watch <pid>`. The `run` subcommand will keep its shape so
+# existing scripts continue to work.
+#
+# Install:
+#     curl -fsSL https://raw.githubusercontent.com/just-an-oldsalt/niacin/main/scripts/niacin -o /usr/local/bin/niacin
+#     chmod +x /usr/local/bin/niacin
+#
+# (or symlink from a checked-out clone of the niacin repo if you prefer).
+
+set -e
+
+usage() {
+    cat <<'USAGE' >&2
+Usage: niacin run -- <command> [args...]
+
+Runs <command> with Niacin keeping the system awake for its duration.
+Niacin deactivates when the command exits, fails, or is interrupted.
+
+Drives the niacin:// URL scheme on a running Niacin app. If Niacin
+isn't already running, macOS launches it on demand.
+
+Examples:
+    niacin run -- make build
+    niacin run -- xcodebuild test -scheme MyApp
+    niacin run -- bash -c 'sleep 3600 && say "done"'
+
+Future subcommands (planned for v2.1+):
+    niacin status       — show current state
+    niacin activate 30m — start a timed session
+    niacin deactivate   — end the current session
+    niacin watch <pid>  — stay awake until pid exits
+USAGE
+}
+
+if [ "$#" -eq 0 ] || [ "$1" = "-h" ] || [ "$1" = "--help" ]; then
+    usage
+    exit 0
+fi
+
+subcommand="$1"
+shift
+
+case "$subcommand" in
+    run)
+        if [ "$1" != "--" ]; then
+            echo "niacin: missing '--' separator before the command" >&2
+            echo >&2
+            usage
+            exit 2
+        fi
+        shift
+
+        if [ "$#" -eq 0 ]; then
+            echo "niacin: no command given to run" >&2
+            usage
+            exit 2
+        fi
+
+        # Always deactivate on the way out — whether the wrapped command
+        # exited cleanly, failed, or got interrupted by Ctrl+C / SIGTERM.
+        cleanup() {
+            open "niacin://deactivate" 2>/dev/null || true
+        }
+        trap cleanup EXIT INT TERM
+
+        # Use -g so Niacin doesn't steal foreground focus if it has to
+        # cold-launch to receive the URL.
+        open -g "niacin://activate?duration=indefinite"
+
+        # Brief settling time so Niacin processes the URL before the
+        # wrapped command starts. Not strictly required for correctness
+        # (the assertion will be held by the time the command finishes),
+        # but it makes the menu-bar UI reflect the active state right
+        # away rather than mid-command.
+        sleep 0.5
+
+        # Run the user's command, preserving its exit status.
+        "$@"
+        ;;
+    *)
+        echo "niacin: unknown subcommand '$subcommand'" >&2
+        echo "niacin: only 'run' is currently supported (full CLI lands in v2.1+)" >&2
+        echo >&2
+        usage
+        exit 2
+        ;;
+esac

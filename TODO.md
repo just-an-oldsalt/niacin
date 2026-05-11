@@ -1,4 +1,4 @@
-# niacin — TODO
+# Niacin — TODO
 
 A working list. Roughly grouped; effort estimates are S / M / L; ★ marks ideas that are particularly distinctive vs. competitors (Amphetamine / KeepingYouAwake / Lungo / Theine / Caffeine).
 
@@ -6,21 +6,13 @@ A working list. Roughly grouped; effort estimates are S / M / L; ★ marks ideas
 
 ## Priorities (Richard)
 
-### 1. Better menu bar icon
+### Better menu bar icon
 Currently `cup.and.saucer` / `cup.and.saucer.fill` SF Symbols. Options:
 - Custom template PNG/PDF in the asset catalogue (monochrome, auto-tints to menu bar colour)
 - A pill / vitamin-capsule glyph would lean into the "niacin = vitamin B3" name
 - Active state: solid fill or subtle pulse animation; inactive: outlined
 - Optional: small countdown badge or timer ring while a timed session is running
 - Make sure the asset is a true template image (`isTemplate = true`) so dark/light menu bars both render correctly
-
-### 2. Capitalize "Niacin" everywhere user-facing
-Audit found mixed casing. Decide on **Niacin** as the canonical proper-noun spelling, then:
-- `README.md` heading and prose (currently lowercase "niacin" throughout)
-- `Info.plist` `CFBundleDisplayName` / `CFBundleName` (verify in Xcode build settings — currently the target/product name is `niacin`)
-- About-window app name (driven by bundle display name)
-- Comments and doc-strings in source (cosmetic but consistent)
-- Leave lowercase only where it is a real identifier: bundle ID `com.oldsalt.niacin`, file paths, the Swift module/product name (renaming the product is a bigger surgery — keep separate)
 
 ---
 
