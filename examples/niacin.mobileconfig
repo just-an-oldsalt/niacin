@@ -1,0 +1,142 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<!--
+    Niacin — sample MDM Configuration Profile
+
+    Drop this file into JAMF Pro (Computer → Configuration Profiles → Upload),
+    Kandji, Mosyle, Intune, or any MDM that accepts standard `.mobileconfig`
+    profiles. Replace `YOUR-ORG` and the PayloadOrganization string with your
+    own values, regenerate the three PayloadUUIDs (`uuidgen` on macOS), and
+    sign the profile with your MDM's signing certificate before pushing.
+
+    Demonstrates the v2.0 force-active keys (deploys, apps, AI runtimes)
+    alongside the standard enterprise lockdown set. Strip sections you don't
+    need — every key has a sensible default if omitted (see README.md).
+-->
+<dict>
+    <key>PayloadContent</key>
+    <array>
+        <dict>
+            <key>PayloadType</key>
+            <string>com.apple.ManagedClient.preferences</string>
+            <key>PayloadVersion</key>
+            <integer>1</integer>
+            <key>PayloadIdentifier</key>
+            <string>com.oldsalt.niacin.profile.managedprefs</string>
+            <key>PayloadUUID</key>
+            <string>E7CA1EC3-4F8E-44A3-A12B-9A3F2C9B1DB8</string>
+            <key>PayloadDisplayName</key>
+            <string>Niacin Managed Preferences</string>
+            <key>PayloadDescription</key>
+            <string>Managed preferences for the Niacin sleep-prevention utility.</string>
+            <key>PayloadContent</key>
+            <dict>
+                <key>com.oldsalt.niacin</key>
+                <dict>
+                    <key>Forced</key>
+                    <array>
+                        <dict>
+                            <key>mcx_preference_settings</key>
+                            <dict>
+
+                                <!-- Master enable. Set false to disable Niacin entirely. -->
+                                <key>enabled</key>
+                                <true/>
+
+                                <!-- Activate automatically when the app launches at login. -->
+                                <key>activateOnLaunch</key>
+                                <true/>
+
+                                <!-- Users can still manually deactivate from the menu. -->
+                                <key>allowUserToDisable</key>
+                                <true/>
+
+                                <!-- Hard cap of 4 hours per activation. -->
+                                <key>maxDurationSeconds</key>
+                                <integer>14400</integer>
+
+                                <!-- Indefinite activation not permitted. -->
+                                <key>allowIndefinite</key>
+                                <false/>
+
+                                <!-- Honour the screen-lock policy. -->
+                                <key>allowDisplaySleep</key>
+                                <true/>
+                                <key>preventDeviceLock</key>
+                                <false/>
+                                <key>deactivateOnUserSwitch</key>
+                                <true/>
+
+                                <!-- IT pushes Niacin updates via JAMF; suppress Sparkle. -->
+                                <key>disableAutoUpdate</key>
+                                <true/>
+
+                                <!--
+                                    Force-active during IT deploys (v2.0).
+                                    Any matching running process forces Niacin awake
+                                    silently — no menu-bar flicker, no user prompt.
+                                    Polled every 5 s. Names are case-insensitive
+                                    substring matches against kinfo_proc.p_comm
+                                    (kernel-limited to 16 chars; entries must fit).
+                                -->
+                                <key>forceActiveDuringDeploys</key>
+                                <array>
+                                    <string>jamf</string>
+                                    <string>installd</string>
+                                    <string>softwareupdated</string>
+                                    <string>munki</string>
+                                    <string>IntuneMdmAgent</string>
+                                    <string>mdmclient</string>
+                                    <string>Installer</string>
+                                </array>
+
+                                <!--
+                                    Force-active during specific apps (v2.0).
+                                    Same matching semantics as the deploy list.
+                                    Tweak for your organisation.
+                                -->
+                                <key>forceActiveDuringApps</key>
+                                <array>
+                                    <string>zoom.us</string>
+                                    <string>Microsoft Teams</string>
+                                    <string>obs</string>
+                                </array>
+
+                                <!--
+                                    Auto-detect known local-AI runtimes
+                                    (Ollama, LM Studio, llama.cpp, MLX, ComfyUI,
+                                    InvokeAI, Stable Diffusion, vLLM, mistralrs).
+                                    Off by default. Set true here to enforce on
+                                    fleet-wide (recommended for AI-workstation
+                                    deployments); omit the key entirely to let
+                                    individual users decide via Settings.
+                                -->
+                                <key>aiRuntimeAutoAwake</key>
+                                <true/>
+
+                            </dict>
+                        </dict>
+                    </array>
+                </dict>
+            </dict>
+        </dict>
+    </array>
+    <key>PayloadType</key>
+    <string>Configuration</string>
+    <key>PayloadVersion</key>
+    <integer>1</integer>
+    <key>PayloadDisplayName</key>
+    <string>Niacin — IT Deployment Profile</string>
+    <key>PayloadIdentifier</key>
+    <string>com.oldsalt.niacin.profile</string>
+    <key>PayloadUUID</key>
+    <string>D1354332-49D8-4FD8-B8C5-6CA4F44F927B</string>
+    <key>PayloadOrganization</key>
+    <string>YOUR-ORG</string>
+    <key>PayloadScope</key>
+    <string>System</string>
+    <key>PayloadRemovalDisallowed</key>
+    <false/>
+</dict>
+</plist>

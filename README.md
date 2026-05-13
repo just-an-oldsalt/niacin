@@ -78,10 +78,10 @@ Any key present in the managed domain overrides the user's preference and locks 
 | `deactivateOnUserSwitch` | Bool | *(user)* | Deactivate automatically on fast user switch |
 | `maxDurationSeconds` | Integer | *(none)* | Hard cap on any single activation (seconds) |
 | `allowedDurations` | Array of Integer | *(defaults)* | Override the available duration list entirely |
-| `disableAutoUpdate` | Bool | `false` | Disable Sparkle auto-update entirely. When `true`: no background checks, the in-app "Check for Updates…" UI is hidden, the Settings toggle is locked. Most managed orgs push updates via JAMF and want to suppress self-updates |
+| `disableAutoUpdate` | Bool | `false` | Disable Sparkle auto-update entirely. When `true`: no background checks, the menu bar "Check for Updates…" item is hidden, and the "Check Now" button in Settings is disabled. This is the only opt-out — Niacin otherwise checks for updates daily with no user-facing toggle. Most managed orgs push updates via JAMF and want to suppress self-updates |
 | `forceActiveDuringDeploys` | Array of String | *(empty)* | Process-name patterns that, when matched against a running process, force Niacin awake silently. Designed for IT-deploy daemons (`jamf`, `installd`, `softwareupdated`, `munki`, `IntuneMdmAgent`, `mdmclient`, `Installer`) — the device won't sleep mid-deploy even if the user is away. Polled every 5 seconds. Names are case-insensitive substring matches against `kinfo_proc.p_comm`, kernel-limited to 16 chars |
 | `forceActiveDuringApps` | Array of String | *(empty)* | Same shape as `forceActiveDuringDeploys` but for general apps (`zoom.us`, `OBS`, `obs-studio`, etc.). Force-activates while any matching process is running |
-| `aiRuntimeAutoAwake` | Bool | `true` | Auto-detect known local-AI runtimes (Ollama, LM Studio, llama.cpp server, MLX, ComfyUI, InvokeAI, Stable Diffusion WebUI, vLLM, etc.) and force-activate while any is loaded. Most M-series Mac mini AI workstation owners want this on; can be set `false` to opt out |
+| `aiRuntimeAutoAwake` | Bool | `false` | Auto-detect known local-AI runtimes (Ollama, LM Studio, llama.cpp server, MLX, ComfyUI, InvokeAI, Stable Diffusion WebUI, vLLM, etc.) and force-activate while any is loaded. For Ollama specifically, an additional active-inference probe polls `http://127.0.0.1:11434/api/ps` every 30 s — if no model has been loaded into VRAM for 5+ minutes, force-active is released so the device can sleep. Off by default to avoid surprising users running Ollama as a launchd service; the AI-workstation audience can flip the Settings toggle, and IT can enforce on fleet-wide with `true` here |
 
 ### Example plist
 
@@ -162,7 +162,8 @@ When this key is set, Niacin will:
 
 - Skip background update checks entirely
 - Hide the "Check for Updates…" item from the menu bar menu
-- Lock the "Automatically check for updates" toggle in Settings (with an "Auto-updates disabled by policy" indicator in the Managed-by-Organisation section)
+- Disable the "Check Now" button in Settings and show "Auto-updates disabled by your organisation" alongside it
+- Surface an "Auto-updates disabled by policy" indicator in the Managed-by-Organisation section
 - React to the policy live via the file watcher — flipping the key on or off in the deployed plist takes effect within ~200 ms without restarting the app
 
 ### Kiosk / display mode example
@@ -206,6 +207,41 @@ Lock a device fully awake with no user control:
 5. Scope the profile to your target computers or groups
 
 macOS will write the plist to `/Library/Managed Preferences/` and Niacin will pick it up on next launch without any restart required for most keys.
+
+---
+
+## For IT admins
+
+If your job is to keep a fleet of Macs awake during overnight deploys, the v2.0 release adds three force-activation triggers designed for unattended use:
+
+- **`forceActiveDuringDeploys`** — Niacin silently keeps the device awake while any of your configured deploy daemons are running (`jamf`, `installd`, `softwareupdated`, `munki`, `IntuneMdmAgent`, `mdmclient`, `Installer`). No menu bar flicker, no user prompt — the user wakes up to a finished deploy instead of a half-applied update.
+- **`forceActiveDuringApps`** — same shape for any user-facing app where sleep-during-use is unacceptable (Zoom, Teams, OBS, custom internal tools).
+- **`aiRuntimeAutoAwake`** — auto-detects locally-running AI runtimes (Ollama, LM Studio, llama.cpp server, MLX, ComfyUI, InvokeAI, Stable Diffusion WebUI, vLLM, mistralrs) and keeps the system awake while any is loaded. For Ollama, an active-inference probe additionally drops force-active when no model has been loaded into VRAM for 5+ minutes — Ollama-as-a-launchd-service won't keep the box awake 24/7. Off by default; users can opt in via Settings, or IT can enforce on fleet-wide by setting this key to `true`.
+
+All three are independent of the user's manual session — they hold their own IOKit power assertions. macOS composes them with anything the user has running, so a deploy can complete after the user has manually deactivated for the night.
+
+### Sample Configuration Profile
+
+A ready-to-customise `.mobileconfig` is in [`examples/niacin.mobileconfig`](examples/niacin.mobileconfig). It includes all the force-active keys plus the standard enterprise lockdown (`disableAutoUpdate`, `maxDurationSeconds`, `allowIndefinite=false`, etc.). Before pushing:
+
+1. Replace the three `PayloadUUID` values with fresh ones from `uuidgen`
+2. Replace `YOUR-ORG` in `PayloadOrganization` with your org name
+3. Sign the profile with your MDM's signing certificate (`security cms -S` or via JAMF/Kandji/Mosyle's signing UI)
+4. Upload to your MDM and scope to the appropriate computer group
+
+### Auditing
+
+Every force-active event is logged to the unified log under `subsystem=="com.oldsalt.niacin" category=="audit"`. From a managed device:
+
+```sh
+sudo log show --predicate 'subsystem=="com.oldsalt.niacin" AND category=="audit"' --info --last 24h
+```
+
+Expect lines like `force-active begin: reason=deploy matches=["jamf"]` and `force-active end: reason=deploy`. SIEM agents can ingest the unified log directly (CrowdStrike Falcon, Splunk, etc.) — see [Retention and SIEM integration](#retention-and-siem-integration).
+
+### Live policy reload
+
+Profile pushes take effect within ~200 ms without restarting the app — Niacin watches `/Library/Managed Preferences/` via kqueue. You don't need a `launchctl kickstart` or a logout cycle to apply a JAMF profile push.
 
 ---
 
@@ -312,6 +348,19 @@ log show --archive /tmp/niacin-diag.logarchive --predicate 'subsystem == "com.ol
 ### Retention and SIEM integration
 
 macOS retains unified log output for approximately 7 days by default. For longer retention, use `log collect` to create persistent archives, or configure a SIEM agent (CrowdStrike Falcon, Splunk, etc.) to ingest the unified log directly. SIEM forwarding is not managed by Niacin itself.
+
+---
+
+## Update checks and telemetry
+
+Niacin checks for updates once every 24 hours via Sparkle. The interval is fixed; there is no user-facing toggle to disable or slow down checks. Managed deployments can suppress checks entirely with `disableAutoUpdate` (see [MDM / JAMF Configuration](#mdm--jamf-configuration)).
+
+Each check is an HTTPS `GET` of the appcast at `https://niacin.dort.zone/appcast.xml`. Every request includes:
+
+- **`User-Agent`** — `Niacin/<version> Sparkle/<sparkle-version>`. The server learns the current installed version.
+- **System profile query parameters** — `appName`, `appVersion`, `osVersion`, `cputype`, `cpusubtype`, `model`, `ncpu`, `ramMB`, `cpuFreqMHz`, `lang`. No identifiers, no per-user state, no installation IDs. This is Sparkle's built-in `SUEnableSystemProfiling` and is used to make minimum-OS and architecture-support decisions (e.g. when to drop Intel, what the median RAM looks like for AI-workstation users).
+
+Set `disableAutoUpdate=true` via MDM if your organisation's policy is to suppress all outbound update traffic.
 
 ---
 

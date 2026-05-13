@@ -29,16 +29,33 @@ final class AppState {
     private var deployWatcher: ProcessWatcher?
     private var appWatcher: ProcessWatcher?
     private var aiWatcher: ProcessWatcher?
+    private var ollamaProbe: OllamaInferenceProbe?
 
     private(set) var deployMatches: Set<String> = []
     private(set) var appMatches: Set<String> = []
     private(set) var aiRuntimeMatches: Set<String> = []
+    // True when Ollama's /api/ps endpoint has reported an empty models array
+    // for 5+ minutes — Ollama is running but no model is loaded into VRAM.
+    // While true, any Ollama-matching entries in aiRuntimeMatches are filtered
+    // out of effectiveAIRuntimeMatches so the system can sleep.
+    private(set) var ollamaIdle: Bool = false
 
     private var forceActiveSystemAssertion: IOPMAssertionID = 0
     private var forceActiveDisplayAssertion: IOPMAssertionID = 0
 
+    // Process-presence AI matches with Ollama removed if active-inference
+    // detection has declared it idle. This is the signal that actually drives
+    // force-active state — aiRuntimeMatches stays as the raw process list for
+    // observability.
+    var effectiveAIRuntimeMatches: Set<String> {
+        if ollamaIdle {
+            return aiRuntimeMatches.filter { !$0.lowercased().contains("ollama") }
+        }
+        return aiRuntimeMatches
+    }
+
     var hasForceActive: Bool {
-        !deployMatches.isEmpty || !appMatches.isEmpty || !aiRuntimeMatches.isEmpty
+        !deployMatches.isEmpty || !appMatches.isEmpty || !effectiveAIRuntimeMatches.isEmpty
     }
 
     // True if Niacin is keeping the system awake for *any* reason — user
@@ -187,7 +204,7 @@ final class AppState {
         aiWatcher = ProcessWatcher(
             name: "ai-runtime",
             needlesProvider: {
-                ManagedPreferences.aiRuntimeAutoAwake
+                ManagedPreferences.resolvedAIRuntimeAutoAwake
                     ? ManagedPreferences.defaultAIRuntimeProcesses
                     : []
             }
@@ -195,13 +212,36 @@ final class AppState {
             self?.handleWatcherChange(reason: "ai-runtime", matches: matches)
         }
         aiWatcher?.start()
+
+        // Active-inference refinement layer for Ollama. The aiWatcher above
+        // catches "ollama process is running"; this probe answers "is Ollama
+        // actually doing anything". When Ollama has been idle (no model in
+        // VRAM) for the grace window, the probe sets ollamaIdle=true and
+        // Ollama-matching entries drop out of effectiveAIRuntimeMatches.
+        ollamaProbe = OllamaInferenceProbe { [weak self] idle in
+            guard let self else { return }
+            guard self.ollamaIdle != idle else { return }
+            self.ollamaIdle = idle
+            auditLog.info("ollama-inference: idle=\(idle, privacy: .public)")
+            self.recomputeForceActiveAssertion()
+            self.updateTooltipForForceActive()
+        }
+        ollamaProbe?.start()
     }
 
     private func handleWatcherChange(reason: String, matches: Set<String>) {
         switch reason {
         case "deploy":     deployMatches = matches
         case "app":        appMatches = matches
-        case "ai-runtime": aiRuntimeMatches = matches
+        case "ai-runtime":
+            aiRuntimeMatches = matches
+            // If Ollama disappeared from the running-process list, reset the
+            // probe's idle conclusion so a fresh Ollama launch isn't
+            // suppressed by stale state from a prior session.
+            let hasOllama = matches.contains(where: { $0.lowercased().contains("ollama") })
+            if !hasOllama && ollamaIdle {
+                ollamaIdle = false
+            }
         default: return
         }
 
@@ -275,7 +315,7 @@ final class AppState {
             let sources: [String] = [
                 deployMatches.isEmpty ? nil : "deploy",
                 appMatches.isEmpty ? nil : "app",
-                aiRuntimeMatches.isEmpty ? nil : "AI",
+                effectiveAIRuntimeMatches.isEmpty ? nil : "AI",
             ].compactMap { $0 }
             tooltipText = String(localized: "Niacin — Active for \(sources.joined(separator: ", "))")
         } else {
@@ -453,8 +493,16 @@ final class AppState {
     func attachUpdater(_ updater: SPUUpdater) {
         self.updater = updater
         enforceAutoUpdatePolicy()
-        log.info("updater attached, autoCheck=\(updater.automaticallyChecksForUpdates, privacy: .public)")
+        log.info("updater attached, autoCheck=\(updater.automaticallyChecksForUpdates, privacy: .public) interval=\(updater.updateCheckInterval, privacy: .public)s")
     }
+
+    // Niacin checks for updates daily, period. The only escape hatch is the
+    // managed `disableAutoUpdate` key — IT teams push their own updates via
+    // JAMF and want self-update suppressed. There is no user-facing opt-out;
+    // we re-assert both fields on every policy reload so a stale UserDefaults
+    // value (e.g. SUEnableAutomaticChecks=false written by a prior version)
+    // can't survive a launch.
+    private let dailyCheckInterval: TimeInterval = 86_400
 
     private func enforceAutoUpdatePolicy() {
         guard let updater else { return }
@@ -462,6 +510,10 @@ final class AppState {
         if updater.automaticallyChecksForUpdates != allowed {
             updater.automaticallyChecksForUpdates = allowed
             log.info("auto-update policy change → autoCheck=\(allowed, privacy: .public)")
+        }
+        if updater.updateCheckInterval != dailyCheckInterval {
+            updater.updateCheckInterval = dailyCheckInterval
+            log.info("update interval pinned → \(self.dailyCheckInterval, privacy: .public)s")
         }
     }
 

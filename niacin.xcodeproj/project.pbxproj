@@ -33,9 +33,22 @@
 		01B7C1072FAE59D2007F371E /* niacinUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = niacinUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
+/* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
+		01B7C2002FAE59D0007F371E /* Exceptions for "niacin" folder in "niacin" target */ = {
+			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
+			membershipExceptions = (
+				Info.plist,
+			);
+			target = 01B7C0ED2FAE59D0007F371E /* niacin */;
+		};
+/* End PBXFileSystemSynchronizedBuildFileExceptionSet section */
+
 /* Begin PBXFileSystemSynchronizedRootGroup section */
 		01B7C0F02FAE59D0007F371E /* niacin */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
+			exceptions = (
+				01B7C2002FAE59D0007F371E /* Exceptions for "niacin" folder in "niacin" target */,
+			);
 			path = niacin;
 			sourceTree = "<group>";
 		};

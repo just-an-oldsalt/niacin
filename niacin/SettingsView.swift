@@ -7,6 +7,10 @@ struct SettingsView: View {
     @AppStorage("preventDeviceLock") private var preventDeviceLock = false
     @AppStorage("deactivateOnUserSwitch") private var deactivateOnUserSwitch = false
     @AppStorage("warnSoundOnExpiry") private var warnSoundOnExpiry = false
+    // Default off. Mirrors the built-in default in
+    // ManagedPreferences.resolvedAIRuntimeAutoAwake so the UI state matches
+    // the actual behaviour on first launch.
+    @AppStorage("aiRuntimeAutoAwake") private var aiRuntimeAutoAwake = false
 
     @State private var appState = AppState.shared
 
@@ -45,26 +49,33 @@ struct SettingsView: View {
                        isOn: $warnSoundOnExpiry)
             }
 
+            Section("Auto-activation") {
+                ManagedToggle(
+                    "Keep awake while AI runtimes are running",
+                    isOn: $aiRuntimeAutoAwake,
+                    managed: ManagedPreferences.aiRuntimeAutoAwake
+                )
+                Text("Detects Ollama, LM Studio, llama.cpp, MLX, ComfyUI, InvokeAI, Stable Diffusion, vLLM, and mistralrs. For Ollama, force-active is released after 5 minutes with no model loaded into VRAM.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
             if let updater = appState.updater {
                 Section("Software Update") {
                     let mdmDisabled = ManagedPreferences.disableAutoUpdate
-                    ManagedToggle(
-                        "Automatically check for updates",
-                        isOn: Binding(
-                            get: { updater.automaticallyChecksForUpdates && !mdmDisabled },
-                            set: { updater.automaticallyChecksForUpdates = $0 }
-                        ),
-                        managed: mdmDisabled ? false : nil
-                    )
-                    Picker("Check frequency", selection: Binding(
-                        get: { updater.updateCheckInterval },
-                        set: { updater.updateCheckInterval = $0 }
-                    )) {
-                        Text("Daily").tag(TimeInterval(86_400))
-                        Text("Weekly").tag(TimeInterval(86_400 * 7))
-                        Text("Monthly").tag(TimeInterval(86_400 * 30))
+                    HStack(spacing: 6) {
+                        Text(mdmDisabled
+                             ? "Auto-updates disabled by your organisation."
+                             : "Niacin checks for updates daily.")
+                            .foregroundStyle(.secondary)
+                            .font(.callout)
+                        if mdmDisabled {
+                            Image(systemName: "lock.fill")
+                                .foregroundStyle(.secondary)
+                                .font(.caption2)
+                        }
+                        Spacer()
                     }
-                    .disabled(mdmDisabled)
                     HStack {
                         Spacer()
                         Button("Check Now") { updater.checkForUpdates() }
@@ -100,11 +111,20 @@ struct SettingsView: View {
                     if ManagedPreferences.disableAutoUpdate {
                         PolicyRow("Auto-updates disabled by policy", icon: "lock.fill", tint: .orange)
                     }
+                    if let aiManaged = ManagedPreferences.aiRuntimeAutoAwake {
+                        PolicyRow(
+                            aiManaged
+                                ? "AI runtime auto-awake enforced on"
+                                : "AI runtime auto-awake disabled by policy",
+                            icon: "lock.fill",
+                            tint: .secondary
+                        )
+                    }
                 }
             }
         }
         .formStyle(.grouped)
-        .frame(width: 380, height: 340)
+        .frame(width: 380, height: 460)
         .id(appState.policyRevision)
     }
 
@@ -115,7 +135,8 @@ struct SettingsView: View {
         ManagedPreferences.maxDurationSeconds != nil ||
         ManagedPreferences.disableQuit           ||
         ManagedPreferences.allowedDurations != nil ||
-        ManagedPreferences.disableAutoUpdate
+        ManagedPreferences.disableAutoUpdate     ||
+        ManagedPreferences.aiRuntimeAutoAwake != nil
     }
 }
 

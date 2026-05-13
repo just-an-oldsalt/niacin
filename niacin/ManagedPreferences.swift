@@ -54,8 +54,10 @@ struct ManagedPreferences {
     static var disableQuit: Bool             { bool("disableQuit") ?? false }
 
     // Disable Sparkle auto-update entirely. When true: no background checks,
-    // the in-app "Check for Updates…" UI is hidden/locked. Most managed orgs
-    // push updates via JAMF and want to suppress self-updates.
+    // the menu bar "Check for Updates…" item is hidden, and the "Check Now"
+    // button in Settings is disabled. Most managed orgs push updates via JAMF
+    // and want to suppress self-updates. This is the only opt-out — Niacin
+    // otherwise checks for updates daily with no user-facing toggle.
     static var disableAutoUpdate: Bool       { bool("disableAutoUpdate") ?? false }
 
     // Lock the display-sleep toggle; nil means user-controlled
@@ -106,11 +108,21 @@ struct ManagedPreferences {
 
     // Whether to auto-detect known AI runtimes (Ollama, LM Studio,
     // llama.cpp server, ComfyUI, etc.) and keep the device awake while
-    // they're loaded. The list is hardcoded (see defaultAIRuntimeProcesses);
-    // managed admins can disable detection by setting this to false.
-    // Default: true (most Niacin users on Apple Silicon Macs are exactly
-    // the audience that benefits from this).
-    static var aiRuntimeAutoAwake: Bool { bool("aiRuntimeAutoAwake") ?? true }
+    // they're loaded. The list is hardcoded (see defaultAIRuntimeProcesses).
+    // Managed-only — nil means user-controlled (resolves via
+    // resolvedAIRuntimeAutoAwake below). When managed, MDM wins.
+    static var aiRuntimeAutoAwake: Bool? { bool("aiRuntimeAutoAwake") }
+
+    // The effective value used by the AI watcher and Ollama inference probe:
+    // managed > user-defaults > built-in default (false). Off by default —
+    // process-presence detection alone would keep launchd-managed Ollama
+    // installs awake 24/7, which surprises users who didn't opt in. The AI
+    // workstation audience that wants this on can flip the Settings toggle
+    // (or IT can enforce it fleet-wide via the managed key).
+    static var resolvedAIRuntimeAutoAwake: Bool {
+        if let managed = aiRuntimeAutoAwake { return managed }
+        return UserDefaults.standard.bool(forKey: "aiRuntimeAutoAwake")
+    }
 
     // Known local-AI runtime process names. Case-insensitive substring
     // match against p_comm. Truncation-aware — names that the kernel
