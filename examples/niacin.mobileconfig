@@ -68,12 +68,8 @@
                                 <key>deactivateOnUserSwitch</key>
                                 <true/>
 
-                                <!-- IT pushes Niacin updates via JAMF; suppress Sparkle. -->
-                                <key>disableAutoUpdate</key>
-                                <true/>
-
                                 <!--
-                                    Force-active during IT deploys (v2.0).
+                                    Force-active during IT deploys (Enterprise).
                                     Any matching running process forces Niacin awake
                                     silently — no menu-bar flicker, no user prompt.
                                     Polled every 5 s. Names are case-insensitive
@@ -92,7 +88,7 @@
                                 </array>
 
                                 <!--
-                                    Force-active during specific apps (v2.0).
+                                    Force-active during specific apps (Enterprise).
                                     Same matching semantics as the deploy list.
                                     Tweak for your organisation.
                                 -->
@@ -104,16 +100,29 @@
                                 </array>
 
                                 <!--
-                                    Auto-detect known local-AI runtimes
-                                    (Ollama, LM Studio, llama.cpp, MLX, ComfyUI,
-                                    InvokeAI, Stable Diffusion, vLLM, mistralrs).
-                                    Off by default. Set true here to enforce on
-                                    fleet-wide (recommended for AI-workstation
-                                    deployments); omit the key entirely to let
-                                    individual users decide via Settings.
+                                    Auto-detect known local-AI runtimes via Tier 2
+                                    HTTP probes (Ollama, LM Studio, llama.cpp,
+                                    text-generation-webui, ComfyUI) and, in the
+                                    Enterprise build only, Tier 3 process scans
+                                    (MLX, InvokeAI, Stable Diffusion, vLLM,
+                                    mistralrs). Off by default; set true here to
+                                    enforce on fleet-wide.
                                 -->
                                 <key>aiRuntimeAutoAwake</key>
                                 <true/>
+
+                                <!--
+                                    Local-only MCP server for AI agent integration.
+                                    When true, Niacin exposes 127.0.0.1:11473 to
+                                    AI clients (Claude Desktop, Claude Code, Cursor)
+                                    so they can request keep-awake assertions via
+                                    the `keep_awake` tool with bearer-token auth.
+                                    Tokens are user-generated in Settings and stored
+                                    in Keychain. Omit this key to let individual
+                                    users decide; set false to forbid fleet-wide.
+                                -->
+                                <key>mcpServerEnabled</key>
+                                <false/>
 
                             </dict>
                         </dict>

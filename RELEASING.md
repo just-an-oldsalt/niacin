@@ -1,22 +1,30 @@
 # Releasing Niacin
 
-End-to-end runbook for cutting a new signed, notarized release with Sparkle auto-update support.
+Niacin ships two distinct builds from the same target:
 
-## One-time setup
+| Build              | Configuration | Channel                              | Sandbox | Update mechanism                  |
+| ------------------ | ------------- | ------------------------------------ | ------- | --------------------------------- |
+| **Niacin Enterprise** | `Release`     | Direct download (.dmg / .pkg) via GitHub Releases | Off     | None — IT pushes via MDM         |
+| **Niacin** (MAS)     | `Release-MAS` | Mac App Store                        | On      | Automatic, via the App Store     |
 
-You need this once per machine. Re-run if you reinstall macOS or wipe DerivedData.
+Pick the relevant section below.
+
+---
+
+## Enterprise build
+
+The Enterprise build is for IT-managed fleets. No auto-update, no sandbox, full process-watcher (Tier 3) detection. The `scripts/release.sh` runbook produces signed + notarized `.dmg` and `.pkg` artifacts ready to attach to a GitHub Release.
+
+### One-time setup
+
+Re-run after macOS reinstalls or DerivedData wipes:
 
 1. **Developer ID certs in Keychain.** `security find-identity -v | grep "Developer ID"` should show both `Developer ID Application: …` and `Developer ID Installer: …`. Add via Xcode → Settings → Accounts → Manage Certificates.
 2. **Notarization profile.** `xcrun notarytool store-credentials niacin-notary --apple-id YOUR_APPLE_ID --team-id 346JJCHZP7` — prompts for an app-specific password (generate at appleid.apple.com → Sign-In & Security → App-Specific Passwords).
-3. **Sparkle EdDSA private key.** Already in your login Keychain from when Sparkle was added. The public counterpart is baked into the project as `INFOPLIST_KEY_SUPublicEDKey`. To re-derive: build the project, then run `find ~/Library/Developer/Xcode/DerivedData -name generate_keys -path '*Sparkle*' -exec {} \;`. Don't regenerate unless you intend to invalidate every shipped copy.
 
-## ⚠️ Sandbox disabled
+### Per-release workflow
 
-**Do not flip `ENABLE_APP_SANDBOX` back to `YES` without a plan for Sparkle's admin-rights conflict.** Niacin disabled the App Sandbox in v1.5 because sandboxed Sparkle cannot acquire the admin rights needed to replace the `.app` during auto-update — it fails with `IOReturn -60005` ("Failed to copy system domain rights"). Re-enabling sandbox requires either restricting installs to `~/Applications` (UX-hostile, see git log for the testing pain) or shipping an SMJobBless privileged helper (days of work). If a future Mac App Store distribution is ever needed, that's a *parallel build target*, not a flip of this flag on the existing target.
-
-## Per-release workflow
-
-1. **Bump version.** Edit `MARKETING_VERSION` and `CURRENT_PROJECT_VERSION` in `niacin.xcodeproj/project.pbxproj` (both appear six times — use search-and-replace for both numbers). Commit:
+1. **Bump version.** Edit `MARKETING_VERSION` and `CURRENT_PROJECT_VERSION` in `niacin.xcodeproj/project.pbxproj` (each appears six times — search-and-replace both numbers). Commit:
    ```
    git commit -am "Bump version to X.Y (build N)"
    ```
@@ -25,60 +33,57 @@ You need this once per machine. Re-run if you reinstall macOS or wipe DerivedDat
    ```
    ./scripts/release.sh X.Y
    ```
-   Takes 5–25 minutes — three notarization rounds (`.app`, `.dmg`, `.pkg`) and a Sparkle `.zip` build. The script verifies the version arg matches `MARKETING_VERSION`, so it'll bail loudly if you forgot step 1.
+   Takes 3–15 minutes — two notarization rounds (`.app`, `.dmg`, `.pkg`). The script verifies the version arg matches `MARKETING_VERSION`, so it'll bail loudly if you forgot step 1.
 
-3. **Update the appcast.** The script's final summary prints an `<item>` block ready to paste. Open `appcast.xml`, paste it as the **first** `<item>` inside `<channel>` (newest at top), commit:
+3. **Tag and publish to GitHub.** The script prints the exact commands; copy-paste:
    ```
-   git commit -am "appcast: vX.Y" && git push origin main
-   ```
-
-4. **Mirror appcast to niacin-web.** The live appcast is served from the `niacin-web` repo (a Cloudflare Workers project at `~/Documents/GIT/niacin-web/`), not from direct scp:
-   ```
-   cp appcast.xml ~/Documents/GIT/niacin-web/appcast.xml
-   cd ~/Documents/GIT/niacin-web
-   git add appcast.xml && git commit -m "appcast: vX.Y" && git push origin main
-   ```
-   Cloudflare auto-deploys within 30–90 seconds. Only the niacin-web push triggers the deploy that Sparkle clients actually poll.
-
-5. **Upload appcast to niacin.dort.zone.** Replace the old `appcast.xml` on the site. Sparkle clients poll this URL for updates:
-   ```
-   scp appcast.xml niacin.dort.zone:/path/to/site/appcast.xml
-   ```
-   (Adjust path to wherever the site is hosted. Cache headers should not be longer than ~1 hour or new releases won't propagate.)
-
-6. **Tag and publish to GitHub.** The script prints the exact commands; copy-paste:
-   ```
-   git tag -a vX.Y -m "Niacin X.Y"
+   git tag -a vX.Y -m "Niacin Enterprise X.Y"
    git push origin vX.Y
    gh release create vX.Y \
-       --title "Niacin X.Y" \
+       --title "Niacin Enterprise X.Y" \
        --generate-notes \
        build/release/artifacts/niacin-X.Y.dmg \
        build/release/artifacts/niacin-X.Y.pkg \
-       build/release/artifacts/niacin-X.Y.zip \
        build/release/artifacts/SHA256SUMS
    ```
 
-7. **Verify.** On a Mac running the previous version, open Niacin → menu → "Check for Updates…". Sparkle should detect the new version, download the `.zip`, verify the EdDSA signature, prompt to install, and relaunch.
-
-## Failure modes
+### Failure modes
 
 | Symptom | Likely cause |
 |---|---|
-| Sparkle reports "no update available" but the version is higher in appcast | Cache header on `appcast.xml` is too long, OR Sparkle is hitting the wrong URL — check `defaults read com.oldsalt.niacin SUFeedURL` |
-| Sparkle reports "signature mismatch" | EdDSA private key on this machine differs from the one whose public key is in `Info.plist`. Either regenerate everything (and invalidate prior installs) or restore the original private key from a backup. |
-| `sign_update` not found in the release script | Build the project once in Xcode after a clean / DerivedData wipe so SPM resolves Sparkle. |
 | Notarization rejected on `.app` | `xcrun notarytool log <SUBMISSION_ID> --keychain-profile niacin-notary` for the actual reason — usually a missing Hardened Runtime flag or a bad entitlement. |
-| `.pkg` won't auto-update existing v1.x installs | Existing v1.x has no Sparkle in it; users on v1.x must update manually once. From v1.3 onward (the first Sparkle release), updates are automatic. |
+| `pkgbuild` complains about identifier | The `.pkg` identifier needs to be unique per release — the script derives it from `APP_BUNDLE_ID`. |
+| Gatekeeper rejects the stapled artifact | The `.app` was modified after stapling. Re-archive from scratch. |
 
-### Local testing from the `.zip`
+---
 
-macOS attaches `com.apple.quarantine` to `curl`/browser-downloaded zips. Two cascading consequences:
+## Mac App Store build
 
-1. **Don't use plain `unzip`** to extract — it strips extended attributes including the stapled notarization ticket, leaving the resulting `.app` appearing unsigned. Use `ditto -x -k niacin-X.Y.zip ~/Applications/` instead; `ditto` is macOS's native preserve-everything extractor and is what Sparkle itself uses for the same reason.
+The MAS build is for individual users discovering Niacin via the App Store. Sandboxed, no process-watcher, AI runtime detection via Tier 2 probes only, plus the MCP server for agent-driven keep-awake. Distribution is through App Store Connect — there is no command-line release script.
 
-2. **Strip quarantine before first launch** to avoid macOS's App Translocation (which runs the app from a randomized read-only `/private/var/folders/...` path and breaks Sparkle's ability to update it):
-   ```
-   xattr -dr com.apple.quarantine ~/Applications/Niacin.app
-   ```
-   If you do launch first via Finder (right-click → Open → Gatekeeper accept), macOS will clear the quarantine itself — but this only works *before* the app translocation locks the bundle.
+### One-time setup
+
+1. **App Store Connect record** for bundle ID `com.oldsalt.niacin.mas` (separate from the Enterprise `com.oldsalt.niacin`). Set the App Information → Subtitle without using Apple trademarks: e.g. **"Keep your computer awake."** (≤30 chars). Do **not** use "Mac" or "macOS" in the subtitle — it triggers 5.2.5 IP rejections.
+2. **Apple Distribution cert** in Keychain — Xcode → Settings → Accounts → Manage Certificates → +.
+3. **Provisioning profile** auto-managed by Xcode (target signing → "Automatically manage signing", team 346JJCHZP7).
+
+### Per-release workflow
+
+1. **Bump version** (same as Enterprise — `MARKETING_VERSION` and `CURRENT_PROJECT_VERSION` in `project.pbxproj`).
+2. **Archive in Xcode.** Product → Scheme → Edit Scheme → Archive → choose **Release-MAS** configuration. Then Product → Archive.
+3. **Distribute App** from the Organizer window:
+   - Distribution method: App Store Connect
+   - Upload (not Export) — Xcode validates the signature, sandbox entitlements, and uploads to App Store Connect.
+4. In App Store Connect, attach the new build to a version, fill in release notes, submit for review.
+
+### Common review snags
+
+- **5.2.5 (Apple trademarks)** — anything in the subtitle/keywords/screenshots that uses "Mac", "macOS", "App Store", "AirDrop", etc. as a product modifier. Use generic terms.
+- **2.5.1 (private APIs)** — usually a false positive from a transitive symbol; appeal with a reasoned explanation.
+- **`network.server` entitlement scrutiny** — first MAS submission of v2.1 may prompt the reviewer to ask "why does a keep-awake utility need a server?" Reply in the Resolution Center: "Niacin runs a localhost-only MCP endpoint (bound to 127.0.0.1) so AI agents can request keep-awake assertions via the Model Context Protocol. All requests require a bearer token generated by the user in Settings. No network traffic leaves the device."
+
+### Coexistence with the Enterprise build
+
+The two builds use different bundle IDs (`com.oldsalt.niacin` vs `com.oldsalt.niacin.mas`) so they can be installed side-by-side on a developer's machine without conflict. Each has its own UserDefaults / Keychain entries / managed-prefs domain.
+
+If a user installs both, both will hold IOPMAssertions independently. Either build alone is enough to keep the system awake.

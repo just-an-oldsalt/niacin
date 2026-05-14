@@ -11,6 +11,22 @@ struct AboutView: View {
         NSRunningApplication.current.icon ?? NSApp.applicationIconImage
     }
 
+    private var productName: String {
+        #if MAS_BUILD
+        return "Niacin"
+        #else
+        return "Niacin Enterprise"
+        #endif
+    }
+
+    private var tagline: String {
+        #if MAS_BUILD
+        return "Keep your computer awake — driven by you or your AI agents."
+        #else
+        return "Keep your computer awake — MDM-managed, audit-logged, AI-aware."
+        #endif
+    }
+
     var body: some View {
         VStack(spacing: 20) {
             Image(nsImage: appIcon)
@@ -18,7 +34,7 @@ struct AboutView: View {
                 .frame(width: 80, height: 80)
 
             VStack(spacing: 4) {
-                Text("Niacin")
+                Text(productName)
                     .font(.title2)
                     .fontWeight(.semibold)
                 Text(version)
@@ -26,7 +42,7 @@ struct AboutView: View {
                     .foregroundStyle(.secondary)
             }
 
-            Text("Keeps your Mac awake — built for the enterprise.")
+            Text(tagline)
                 .font(.callout)
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)
