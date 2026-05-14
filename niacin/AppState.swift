@@ -18,38 +18,47 @@ final class AppState {
 
     // ─── Force-active state (v2.0) ─────────────────────────────────────
     //
-    // Three independent ProcessWatchers feed into one set of IOKit power
-    // assertions held by AppState itself (separate from the user-session
-    // assertions held by `preventer`). When any watcher has matches, the
-    // force-active assertion is held; macOS composes both assertion pairs
-    // so the system stays awake whether the user activated manually OR a
-    // watcher matched, OR both.
+    // Multiple signals feed into one set of IOKit power assertions held by
+    // AppState itself (separate from the user-session assertions held by
+    // `preventer`). When any signal is active, the force-active assertion
+    // is held; macOS composes both assertion pairs so the system stays
+    // awake whether the user activated manually OR a watcher matched, OR
+    // both.
+    //
+    // AI runtime detection has two tiers:
+    //   - AIRuntimeProbeRegistry: HTTP probes against known runtimes' local
+    //     servers. Sandbox-safe (loopback only). Authoritative for runtimes
+    //     it covers — its idle verdict overrides any process-watcher match.
+    //   - ProcessWatcher: name scan via `sysctl(KERN_PROC_ALL)`. Catches
+    //     headless runtimes the probes don't know about. Requires unsandboxed
+    //     entitlements; only runs in Enterprise builds (see Phase 3).
     private var deployWatcher: ProcessWatcher?
     private var appWatcher: ProcessWatcher?
     private var aiWatcher: ProcessWatcher?
-    private var ollamaProbe: OllamaInferenceProbe?
+    private var aiProbeRegistry: AIRuntimeProbeRegistry?
 
     private(set) var deployMatches: Set<String> = []
     private(set) var appMatches: Set<String> = []
+    // Raw process-name matches from the AI ProcessWatcher (Enterprise only).
     private(set) var aiRuntimeMatches: Set<String> = []
-    // True when Ollama's /api/ps endpoint has reported an empty models array
-    // for 5+ minutes — Ollama is running but no model is loaded into VRAM.
-    // While true, any Ollama-matching entries in aiRuntimeMatches are filtered
-    // out of effectiveAIRuntimeMatches so the system can sleep.
-    private(set) var ollamaIdle: Bool = false
+    // Display names of runtimes reported busy by the probe registry.
+    private(set) var aiProbeMatches: Set<String> = []
 
     private var forceActiveSystemAssertion: IOPMAssertionID = 0
     private var forceActiveDisplayAssertion: IOPMAssertionID = 0
 
-    // Process-presence AI matches with Ollama removed if active-inference
-    // detection has declared it idle. This is the signal that actually drives
-    // force-active state — aiRuntimeMatches stays as the raw process list for
-    // observability.
+    // Combined AI-runtime signal: probe matches (authoritative) plus process
+    // matches the probe doesn't already cover. If the probe knows about a
+    // runtime and reports it as idle/offline, the process scan can't override
+    // that — preserves the v2.0 behaviour of letting an idle Ollama drop out.
     var effectiveAIRuntimeMatches: Set<String> {
-        if ollamaIdle {
-            return aiRuntimeMatches.filter { !$0.lowercased().contains("ollama") }
+        let coveredByProbe = aiProbeRegistry?.coveredProcessNames ?? []
+        let processOnly = aiRuntimeMatches.filter { match in
+            !coveredByProbe.contains { covered in
+                match.lowercased().contains(covered.lowercased())
+            }
         }
-        return aiRuntimeMatches
+        return aiProbeMatches.union(processOnly)
     }
 
     var hasForceActive: Bool {
@@ -211,35 +220,26 @@ final class AppState {
         }
         aiWatcher?.start()
 
-        // Active-inference refinement layer for Ollama. The aiWatcher above
-        // catches "ollama process is running"; this probe answers "is Ollama
-        // actually doing anything". When Ollama has been idle (no model in
-        // VRAM) for the grace window, the probe sets ollamaIdle=true and
-        // Ollama-matching entries drop out of effectiveAIRuntimeMatches.
-        ollamaProbe = OllamaInferenceProbe { [weak self] idle in
+        // Sandbox-safe probe layer for AI runtimes that expose HTTP servers
+        // (Ollama, LM Studio, llama.cpp, text-generation-webui, ComfyUI).
+        // Authoritative over its covered runtimes — a probe-reported idle
+        // overrides a process-name match for that same runtime.
+        aiProbeRegistry = AIRuntimeProbeRegistry { [weak self] busy in
             guard let self else { return }
-            guard self.ollamaIdle != idle else { return }
-            self.ollamaIdle = idle
-            auditLog.info("ollama-inference: idle=\(idle, privacy: .public)")
+            guard self.aiProbeMatches != busy else { return }
+            self.aiProbeMatches = busy
+            auditLog.info("ai-probe: busy=\(busy.sorted(), privacy: .public)")
             self.recomputeForceActiveAssertion()
             self.updateTooltipForForceActive()
         }
-        ollamaProbe?.start()
+        aiProbeRegistry?.start()
     }
 
     private func handleWatcherChange(reason: String, matches: Set<String>) {
         switch reason {
         case "deploy":     deployMatches = matches
         case "app":        appMatches = matches
-        case "ai-runtime":
-            aiRuntimeMatches = matches
-            // If Ollama disappeared from the running-process list, reset the
-            // probe's idle conclusion so a fresh Ollama launch isn't
-            // suppressed by stale state from a prior session.
-            let hasOllama = matches.contains(where: { $0.lowercased().contains("ollama") })
-            if !hasOllama && ollamaIdle {
-                ollamaIdle = false
-            }
+        case "ai-runtime": aiRuntimeMatches = matches
         default: return
         }
 
