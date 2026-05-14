@@ -10,8 +10,12 @@ struct SettingsView: View {
     // ManagedPreferences.resolvedAIRuntimeAutoAwake so the UI state matches
     // the actual behaviour on first launch.
     @AppStorage("aiRuntimeAutoAwake") private var aiRuntimeAutoAwake = false
+    @AppStorage("mcpServerEnabled") private var mcpServerEnabled = false
 
     @State private var appState = AppState.shared
+    @State private var mcpToken: String? = nil
+    @State private var mcpTokenJustGenerated = false
+    @State private var mcpCopiedFlash = false
 
     var body: some View {
         // .id() forces a clean rebuild when policy changes so static
@@ -59,6 +63,26 @@ struct SettingsView: View {
                     .foregroundStyle(.secondary)
             }
 
+            Section("AI Agent Integration (MCP)") {
+                ManagedToggle(
+                    "Allow AI agents to drive keep-awake",
+                    isOn: $mcpServerEnabled,
+                    managed: ManagedPreferences.mcpServerEnabled
+                )
+                .onChange(of: mcpServerEnabled) { _, _ in
+                    appState.refreshMCPServer()
+                    refreshToken()
+                }
+
+                if ManagedPreferences.resolvedMCPServerEnabled {
+                    mcpServerStatusView
+                }
+
+                Text("Niacin runs a local-only MCP server. Paired AI agents (Claude Desktop, Claude Code, Cursor) can request keep-awake assertions via the `keep_awake` tool.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
             if hasManagedPolicies {
                 Section("Managed by Organisation") {
                     if !ManagedPreferences.isEnabled {
@@ -96,8 +120,9 @@ struct SettingsView: View {
             }
         }
         .formStyle(.grouped)
-        .frame(width: 380, height: 460)
+        .frame(width: 380, height: 560)
         .id(appState.policyRevision)
+        .onAppear { refreshToken() }
     }
 
     private var hasManagedPolicies: Bool {
@@ -107,7 +132,104 @@ struct SettingsView: View {
         ManagedPreferences.maxDurationSeconds != nil ||
         ManagedPreferences.disableQuit           ||
         ManagedPreferences.allowedDurations != nil ||
-        ManagedPreferences.aiRuntimeAutoAwake != nil
+        ManagedPreferences.aiRuntimeAutoAwake != nil ||
+        ManagedPreferences.mcpServerEnabled != nil
+    }
+
+    // MARK: - MCP server status / token UX
+
+    @ViewBuilder
+    private var mcpServerStatusView: some View {
+        let port = appState.mcpServer?.actualPort.map(String.init) ?? "(starting…)"
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 6) {
+                Image(systemName: appState.mcpServer != nil ? "checkmark.circle.fill" : "exclamationmark.triangle.fill")
+                    .foregroundStyle(appState.mcpServer != nil ? .green : .orange)
+                Text("Listening on `http://127.0.0.1:\(port)`")
+                    .font(.callout.monospaced())
+            }
+
+            if let token = mcpToken, mcpTokenJustGenerated {
+                Text("Token (shown once):")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                Text(token)
+                    .font(.system(.caption, design: .monospaced))
+                    .textSelection(.enabled)
+                    .padding(6)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(Color(NSColor.textBackgroundColor))
+                    .cornerRadius(4)
+            } else if mcpToken != nil {
+                Text("Token configured (use Rotate to generate a new one).")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            } else {
+                Text("No token yet — generate one to connect a client.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
+            HStack(spacing: 8) {
+                if mcpToken == nil {
+                    Button("Generate Token") { generateToken() }
+                } else {
+                    Button("Rotate Token") { generateToken() }
+                    Button("Revoke") { revokeToken() }
+                        .foregroundStyle(.red)
+                }
+                Spacer()
+                Button(mcpCopiedFlash ? "Copied!" : "Copy Config Snippet") {
+                    copyConfigSnippet()
+                }
+                .disabled(mcpToken == nil)
+            }
+        }
+        .padding(.vertical, 4)
+    }
+
+    private func refreshToken() {
+        mcpTokenJustGenerated = false
+        mcpToken = try? MCPTokenStore.currentToken()
+    }
+
+    private func generateToken() {
+        do {
+            mcpToken = try MCPTokenStore.generateAndStore()
+            mcpTokenJustGenerated = true
+        } catch {
+            mcpToken = nil
+            mcpTokenJustGenerated = false
+        }
+    }
+
+    private func revokeToken() {
+        try? MCPTokenStore.revoke()
+        mcpToken = nil
+        mcpTokenJustGenerated = false
+    }
+
+    private func copyConfigSnippet() {
+        guard let token = mcpToken, let port = appState.mcpServer?.actualPort else { return }
+        let snippet = """
+        {
+          "mcpServers": {
+            "niacin": {
+              "url": "http://127.0.0.1:\(port)",
+              "headers": {
+                "Authorization": "Bearer \(token)"
+              }
+            }
+          }
+        }
+        """
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(snippet, forType: .string)
+        mcpCopiedFlash = true
+        Task { @MainActor in
+            try? await Task.sleep(for: .seconds(1.5))
+            mcpCopiedFlash = false
+        }
     }
 }
 

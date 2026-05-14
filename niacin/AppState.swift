@@ -47,6 +47,14 @@ final class AppState {
     // Display names of runtimes reported busy by the probe registry.
     private(set) var aiProbeMatches: Set<String> = []
 
+    // MCP-driven keep-awake sessions. Each session corresponds to one
+    // outstanding `keep_awake` tool call from an MCP client. Sessions self-
+    // release via `mcpSessionTasks` once their duration elapses, or via an
+    // explicit `release_awake` call.
+    private(set) var mcpSessions: [String: MCPSession] = [:]
+    private var mcpSessionTasks: [String: Task<Void, Never>] = [:]
+    private(set) var mcpServer: MCPServer?
+
     private var forceActiveSystemAssertion: IOPMAssertionID = 0
     private var forceActiveDisplayAssertion: IOPMAssertionID = 0
 
@@ -65,7 +73,10 @@ final class AppState {
     }
 
     var hasForceActive: Bool {
-        !deployMatches.isEmpty || !appMatches.isEmpty || !effectiveAIRuntimeMatches.isEmpty
+        !deployMatches.isEmpty
+            || !appMatches.isEmpty
+            || !effectiveAIRuntimeMatches.isEmpty
+            || !mcpSessions.isEmpty
     }
 
     // True if Niacin is keeping the system awake for *any* reason — user
@@ -174,6 +185,7 @@ final class AppState {
 
         sweepOrphanCaffeinate()
         startProcessWatchers()
+        refreshMCPServer()
 
         let shouldActivate = ManagedPreferences.activateOnLaunch
             ?? UserDefaults.standard.bool(forKey: "activateOnLaunch")
@@ -238,6 +250,36 @@ final class AppState {
             self.updateTooltipForForceActive()
         }
         aiProbeRegistry?.start()
+    }
+
+    // MARK: - MCP server lifecycle
+
+    func startMCPServer() {
+        guard mcpServer == nil else { return }
+        let server = MCPServer(delegate: self)
+        do {
+            try server.start()
+            mcpServer = server
+            log.info("mcp server started on port \(server.actualPort ?? 0, privacy: .public)")
+        } catch {
+            log.error("mcp server failed to start: \(error.localizedDescription, privacy: .public)")
+        }
+    }
+
+    func stopMCPServer() {
+        mcpServer?.stop()
+        mcpServer = nil
+        // Stopping the listener doesn't tear down outstanding sessions —
+        // assertions stay held until they expire or are released by API.
+    }
+
+    func refreshMCPServer() {
+        let wantedOn = ManagedPreferences.resolvedMCPServerEnabled
+        if wantedOn && mcpServer == nil {
+            startMCPServer()
+        } else if !wantedOn && mcpServer != nil {
+            stopMCPServer()
+        }
     }
 
     private func handleWatcherChange(reason: String, matches: Set<String>) {
@@ -319,6 +361,7 @@ final class AppState {
                 deployMatches.isEmpty ? nil : "deploy",
                 appMatches.isEmpty ? nil : "app",
                 effectiveAIRuntimeMatches.isEmpty ? nil : "AI",
+                mcpSessions.isEmpty ? nil : "MCP",
             ].compactMap { $0 }
             tooltipText = String(localized: "Niacin — Active for \(sources.joined(separator: ", "))")
         } else {
@@ -475,6 +518,7 @@ final class AppState {
         // is needed — the next read will see the current plist contents.
         policyRevision += 1
         log.info("policyRevision=\(self.policyRevision, privacy: .public) isActive=\(self.preventer.isActive, privacy: .public) isEnabled=\(ManagedPreferences.isEnabled, privacy: .public)")
+        refreshMCPServer()
 
         guard preventer.isActive else { return }
 
@@ -512,3 +556,87 @@ final class AppState {
         return nil
     }
 }
+
+// MARK: - MCPSession
+
+struct MCPSession: Sendable, Identifiable {
+    let id: String
+    let reason: String
+    let createdAt: Date
+    let expiresAt: Date?
+    let clientName: String?
+    let allowDisplaySleep: Bool
+}
+
+// MARK: - MCPDelegate conformance
+
+extension AppState: MCPDelegate {
+    func mcpKeepAwake(durationSeconds: Int?, reason: String, allowDisplaySleep: Bool, clientName: String?) -> MCPKeepAwakeResult {
+        let now = Date()
+        let expiresAt: Date? = durationSeconds.map { now.addingTimeInterval(TimeInterval($0)) }
+        let session = MCPSession(
+            id: UUID().uuidString,
+            reason: reason,
+            createdAt: now,
+            expiresAt: expiresAt,
+            clientName: clientName,
+            allowDisplaySleep: allowDisplaySleep
+        )
+        mcpSessions[session.id] = session
+
+        // Auto-release task — replaces a Timer so it survives a system sleep
+        // (Task.sleep is wall-clock, not run-loop).
+        if let duration = durationSeconds, duration > 0 {
+            let id = session.id
+            mcpSessionTasks[id] = Task { [weak self] in
+                try? await Task.sleep(for: .seconds(duration))
+                guard !Task.isCancelled else { return }
+                await MainActor.run {
+                    _ = self?.releaseMCPSessionInternal(id: id)
+                }
+            }
+        }
+
+        recomputeForceActiveAssertion()
+        updateTooltipForForceActive()
+        return MCPKeepAwakeResult(sessionId: session.id, expiresAt: expiresAt)
+    }
+
+    func mcpReleaseAwake(sessionId: String?) -> Bool {
+        if let id = sessionId {
+            return releaseMCPSessionInternal(id: id)
+        }
+        // No id → release every MCP-owned session.
+        let ids = Array(mcpSessions.keys)
+        var any = false
+        for id in ids { any = releaseMCPSessionInternal(id: id) || any }
+        return any
+    }
+
+    func mcpStatus() -> MCPStatus {
+        var sources: [String] = []
+        if !deployMatches.isEmpty { sources.append("deploy(\(deployMatches.count))") }
+        if !appMatches.isEmpty { sources.append("app(\(appMatches.count))") }
+        for name in effectiveAIRuntimeMatches.sorted() { sources.append("ai:\(name)") }
+        for s in mcpSessions.values {
+            sources.append("mcp:\(s.clientName ?? "agent")")
+        }
+        if preventer.isActive { sources.append("user") }
+
+        return MCPStatus(
+            keepingAwake: isKeepingAwake,
+            activeUntil: preventer.activeUntil,
+            forceActiveSources: sources
+        )
+    }
+
+    @discardableResult
+    fileprivate func releaseMCPSessionInternal(id: String) -> Bool {
+        guard mcpSessions.removeValue(forKey: id) != nil else { return false }
+        mcpSessionTasks.removeValue(forKey: id)?.cancel()
+        recomputeForceActiveAssertion()
+        updateTooltipForForceActive()
+        return true
+    }
+}
+

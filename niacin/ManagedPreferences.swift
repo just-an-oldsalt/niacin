@@ -117,6 +117,21 @@ struct ManagedPreferences {
         return UserDefaults.standard.bool(forKey: "aiRuntimeAutoAwake")
     }
 
+    // Whether the MCP (Model Context Protocol) server is allowed to run.
+    // When true, Niacin binds an HTTP listener on 127.0.0.1 so AI agents
+    // (Claude Desktop, Cursor, Claude Code, …) can request keep-awake
+    // assertions directly via the `keep_awake` tool. Bearer-token auth
+    // required on every request. Managed-only — nil means user-controlled.
+    static var mcpServerEnabled: Bool? { bool("mcpServerEnabled") }
+
+    // Effective value for the MCP server toggle: managed > user-defaults
+    // > built-in default (false). Off by default — the server is opt-in
+    // because it exposes a network listener (loopback only, but still).
+    static var resolvedMCPServerEnabled: Bool {
+        if let managed = mcpServerEnabled { return managed }
+        return UserDefaults.standard.bool(forKey: "mcpServerEnabled")
+    }
+
     // Known local-AI runtime process names. Case-insensitive substring
     // match against p_comm. Truncation-aware — names that the kernel
     // would chop are entered in their post-truncation form.
