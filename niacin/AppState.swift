@@ -32,14 +32,17 @@ final class AppState {
     //   - ProcessWatcher: name scan via `sysctl(KERN_PROC_ALL)`. Catches
     //     headless runtimes the probes don't know about. Requires unsandboxed
     //     entitlements; only runs in Enterprise builds (see Phase 3).
+    #if !MAS_BUILD
     private var deployWatcher: ProcessWatcher?
     private var appWatcher: ProcessWatcher?
     private var aiWatcher: ProcessWatcher?
+    #endif
     private var aiProbeRegistry: AIRuntimeProbeRegistry?
 
     private(set) var deployMatches: Set<String> = []
     private(set) var appMatches: Set<String> = []
-    // Raw process-name matches from the AI ProcessWatcher (Enterprise only).
+    // Raw process-name matches from the AI ProcessWatcher. Always empty in
+    // MAS builds (ProcessWatcher is compiled out — see ProcessWatcher.swift).
     private(set) var aiRuntimeMatches: Set<String> = []
     // Display names of runtimes reported busy by the probe registry.
     private(set) var aiProbeMatches: Set<String> = []
@@ -192,6 +195,7 @@ final class AppState {
     // ─── Force-active watchers (v2.0) ──────────────────────────────────
 
     private func startProcessWatchers() {
+        #if !MAS_BUILD
         deployWatcher = ProcessWatcher(
             name: "deploy",
             needlesProvider: { ManagedPreferences.forceActiveDuringDeploys }
@@ -219,6 +223,7 @@ final class AppState {
             self?.handleWatcherChange(reason: "ai-runtime", matches: matches)
         }
         aiWatcher?.start()
+        #endif
 
         // Sandbox-safe probe layer for AI runtimes that expose HTTP servers
         // (Ollama, LM Studio, llama.cpp, text-generation-webui, ComfyUI).

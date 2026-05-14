@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<!-- App Sandbox is mandatory for Mac App Store. -->
+	<key>com.apple.security.app-sandbox</key>
+	<true/>
+	<!-- Outbound HTTP for the AI-runtime probe registry: GETs against
+	     127.0.0.1 on well-known AI ports (Ollama 11434, LM Studio 1234,
+	     llama.cpp 8080, ComfyUI 8188, text-gen-webui 5000). No external
+	     hosts are contacted. -->
+	<key>com.apple.security.network.client</key>
+	<true/>
+	<!-- Local MCP server listens on 127.0.0.1 so AI agents can request
+	     keep-awake assertions. Bearer token required on every request. -->
+	<key>com.apple.security.network.server</key>
+	<true/>
+</dict>
+</plist>

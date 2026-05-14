@@ -1,3 +1,10 @@
+// ProcessWatcher uses `sysctl(KERN_PROC_ALL)` to enumerate every running
+// process by name. Under App Sandbox the kernel filters that call to return
+// only the calling app's own processes, so the watcher has no value in the
+// MAS build — it's compiled out entirely there. The MAS build relies on the
+// AIRuntimeProbeRegistry (HTTP probes on loopback) plus, when present, the
+// MCP server through which agents can declare keep-awake intent.
+#if !MAS_BUILD
 import Foundation
 import Darwin
 import OSLog
@@ -134,3 +141,4 @@ final class ProcessWatcher {
         return names
     }
 }
+#endif
