@@ -1,5 +1,4 @@
 import SwiftUI
-import Sparkle
 
 struct SettingsView: View {
     @AppStorage("activateOnLaunch") private var activateOnLaunch = false
@@ -60,30 +59,6 @@ struct SettingsView: View {
                     .foregroundStyle(.secondary)
             }
 
-            if let updater = appState.updater {
-                Section("Software Update") {
-                    let mdmDisabled = ManagedPreferences.disableAutoUpdate
-                    HStack(spacing: 6) {
-                        Text(mdmDisabled
-                             ? "Auto-updates disabled by your organisation."
-                             : "Niacin checks for updates daily.")
-                            .foregroundStyle(.secondary)
-                            .font(.callout)
-                        if mdmDisabled {
-                            Image(systemName: "lock.fill")
-                                .foregroundStyle(.secondary)
-                                .font(.caption2)
-                        }
-                        Spacer()
-                    }
-                    HStack {
-                        Spacer()
-                        Button("Check Now") { updater.checkForUpdates() }
-                            .disabled(mdmDisabled)
-                    }
-                }
-            }
-
             if hasManagedPolicies {
                 Section("Managed by Organisation") {
                     if !ManagedPreferences.isEnabled {
@@ -107,9 +82,6 @@ struct SettingsView: View {
                     }
                     if ManagedPreferences.allowedDurations != nil {
                         PolicyRow("Available durations set by policy", icon: "list.bullet", tint: .secondary)
-                    }
-                    if ManagedPreferences.disableAutoUpdate {
-                        PolicyRow("Auto-updates disabled by policy", icon: "lock.fill", tint: .orange)
                     }
                     if let aiManaged = ManagedPreferences.aiRuntimeAutoAwake {
                         PolicyRow(
@@ -135,7 +107,6 @@ struct SettingsView: View {
         ManagedPreferences.maxDurationSeconds != nil ||
         ManagedPreferences.disableQuit           ||
         ManagedPreferences.allowedDurations != nil ||
-        ManagedPreferences.disableAutoUpdate     ||
         ManagedPreferences.aiRuntimeAutoAwake != nil
     }
 }

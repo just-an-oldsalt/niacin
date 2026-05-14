@@ -1,6 +1,5 @@
 import SwiftUI
 import AppKit
-import Sparkle
 
 struct MenuBarView: View {
     @Environment(AppState.self) private var appState
@@ -59,12 +58,6 @@ struct MenuBarView: View {
             Button("About Niacin") {
                 openWindow(id: "about")
                 NSApp.activate(ignoringOtherApps: true)
-            }
-
-            if !ManagedPreferences.disableAutoUpdate, let updater = appState.updater {
-                Button("Check for Updates…") {
-                    updater.checkForUpdates()
-                }
             }
 
             if !ManagedPreferences.disableQuit {

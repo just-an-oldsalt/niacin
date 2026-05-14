@@ -2,7 +2,6 @@ import Foundation
 import AppKit
 import OSLog
 import IOKit.pwr_mgt
-import Sparkle
 
 private let log = Logger(subsystem: "com.oldsalt.niacin", category: "policy")
 private let auditLog = Logger(subsystem: "com.oldsalt.niacin", category: "audit")
@@ -16,7 +15,6 @@ final class AppState {
     private var hasLaunched = false
     private var countdownTimer: Timer?
     private let policyWatcher = PolicyWatcher()
-    private(set) var updater: SPUUpdater?
 
     // ─── Force-active state (v2.0) ─────────────────────────────────────
     //
@@ -325,10 +323,10 @@ final class AppState {
 
     // One-shot cleanup for users upgrading from pre-v1.7 builds. Older
     // versions spawned `caffeinate` children that survived parent death and
-    // leaked power assertions across crashes / Sparkle updates / Force Quits.
-    // We kill any caffeinates still parented to launchd (PID 1) — those are
-    // orphans by definition. Caffeinates the user spawned themselves in a
-    // terminal have the shell as parent and are left alone.
+    // leaked power assertions across crashes / updates / Force Quits. We kill
+    // any caffeinates still parented to launchd (PID 1) — those are orphans by
+    // definition. Caffeinates the user spawned themselves in a terminal have
+    // the shell as parent and are left alone.
     //
     // From v1.7 onwards Niacin doesn't spawn caffeinate at all, so this only
     // matters during the upgrade transition. Safe to remove in a later release.
@@ -472,7 +470,6 @@ final class AppState {
         // is needed — the next read will see the current plist contents.
         policyRevision += 1
         log.info("policyRevision=\(self.policyRevision, privacy: .public) isActive=\(self.preventer.isActive, privacy: .public) isEnabled=\(ManagedPreferences.isEnabled, privacy: .public)")
-        enforceAutoUpdatePolicy()
 
         guard preventer.isActive else { return }
 
@@ -483,37 +480,6 @@ final class AppState {
             log.info("deactivating running session: \(reason, privacy: .public)")
             preventer.deactivate()
             stopCountdownTimer()
-        }
-    }
-
-    // MARK: - Sparkle wiring
-
-    // Called once from NiacinApp.init after the SPUStandardUpdaterController
-    // is created. Lets AppState gate auto-checks on the managed-policy key.
-    func attachUpdater(_ updater: SPUUpdater) {
-        self.updater = updater
-        enforceAutoUpdatePolicy()
-        log.info("updater attached, autoCheck=\(updater.automaticallyChecksForUpdates, privacy: .public) interval=\(updater.updateCheckInterval, privacy: .public)s")
-    }
-
-    // Niacin checks for updates daily, period. The only escape hatch is the
-    // managed `disableAutoUpdate` key — IT teams push their own updates via
-    // JAMF and want self-update suppressed. There is no user-facing opt-out;
-    // we re-assert both fields on every policy reload so a stale UserDefaults
-    // value (e.g. SUEnableAutomaticChecks=false written by a prior version)
-    // can't survive a launch.
-    private let dailyCheckInterval: TimeInterval = 86_400
-
-    private func enforceAutoUpdatePolicy() {
-        guard let updater else { return }
-        let allowed = !ManagedPreferences.disableAutoUpdate
-        if updater.automaticallyChecksForUpdates != allowed {
-            updater.automaticallyChecksForUpdates = allowed
-            log.info("auto-update policy change → autoCheck=\(allowed, privacy: .public)")
-        }
-        if updater.updateCheckInterval != dailyCheckInterval {
-            updater.updateCheckInterval = dailyCheckInterval
-            log.info("update interval pinned → \(self.dailyCheckInterval, privacy: .public)s")
         }
     }
 

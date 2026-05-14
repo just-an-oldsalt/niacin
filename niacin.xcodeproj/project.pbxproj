@@ -7,7 +7,6 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
-		01079D772FB02414009DCF52 /* Sparkle in Frameworks */ = {isa = PBXBuildFile; productRef = 01079D762FB02414009DCF52 /* Sparkle */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -69,7 +68,6 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				01079D772FB02414009DCF52 /* Sparkle in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -130,7 +128,6 @@
 			);
 			name = niacin;
 			packageProductDependencies = (
-				01079D762FB02414009DCF52 /* Sparkle */,
 			);
 			productName = niacin;
 			productReference = 01B7C0EE2FAE59D0007F371E /* niacin.app */;
@@ -215,7 +212,6 @@
 			mainGroup = 01B7C0E52FAE59D0007F371E;
 			minimizedProjectReferenceProxies = 1;
 			packageReferences = (
-				01079D752FB02414009DCF52 /* XCRemoteSwiftPackageReference "Sparkle" */,
 			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = 01B7C0EF2FAE59D0007F371E /* Products */;
@@ -602,24 +598,6 @@
 		};
 /* End XCConfigurationList section */
 
-/* Begin XCRemoteSwiftPackageReference section */
-		01079D752FB02414009DCF52 /* XCRemoteSwiftPackageReference "Sparkle" */ = {
-			isa = XCRemoteSwiftPackageReference;
-			repositoryURL = "https://github.com/sparkle-project/Sparkle";
-			requirement = {
-				kind = upToNextMajorVersion;
-				minimumVersion = 2.9.1;
-			};
-		};
-/* End XCRemoteSwiftPackageReference section */
-
-/* Begin XCSwiftPackageProductDependency section */
-		01079D762FB02414009DCF52 /* Sparkle */ = {
-			isa = XCSwiftPackageProductDependency;
-			package = 01079D752FB02414009DCF52 /* XCRemoteSwiftPackageReference "Sparkle" */;
-			productName = Sparkle;
-		};
-/* End XCSwiftPackageProductDependency section */
 	};
 	rootObject = 01B7C0E62FAE59D0007F371E /* Project object */;
 }
