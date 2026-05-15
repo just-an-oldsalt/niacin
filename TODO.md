@@ -4,14 +4,15 @@ Working list. Effort estimates: S / M / L. ★ = distinctive vs. competitors (Am
 
 ---
 
-## v2.0 — remaining before cut
+## v2.1 — remaining before cut
 
 - **Better menu bar icon** ★ — currently `cup.and.saucer` / `cup.and.saucer.fill` SF Symbols. Replace with a custom template PNG/PDF in the asset catalogue (must be `isTemplate = true` so dark/light menu bars both tint correctly). A pill / vitamin-capsule glyph leans into the "niacin = vitamin B3" name. Optional: countdown badge or timer ring while a timed session is running. (S–M)
-- **Version bump + release** — `MARKETING_VERSION` 1.9 → 2.0, `CURRENT_PROJECT_VERSION` 10 → 11; run `scripts/release.sh 2.0`; update appcast on niacin.dort.zone; tag and publish GitHub release. Full runbook in `RELEASING.md`. (S)
+- **Version bump + release** — `MARKETING_VERSION` 2.0 → 2.1, `CURRENT_PROJECT_VERSION` 11 → 12; run `scripts/release.sh 2.1`; tag and publish GitHub release for the Enterprise channel; archive the MAS configuration in Xcode and submit to App Store Connect. Full runbook in `RELEASING.md`. (S)
+- **MAS metadata** — update App Store Connect subtitle to avoid Apple trademark terms (no "Mac" / "macOS") — see `RELEASING.md`. Generate App Store screenshots, write the description, fill in the localised metadata. (S)
 
 ---
 
-## v2.1 — Developer CLI
+## v2.2 — Developer CLI
 
 Stream 3 follow-through. The `niacin://` URL scheme + `niacin run` wrapper shipped in v2.0; this is the rest.
 
@@ -25,7 +26,7 @@ Stream 3 follow-through. The `niacin://` URL scheme + `niacin run` wrapper shipp
 
 ---
 
-## v2.2 — Enterprise depth
+## v2.3 — Enterprise depth
 
 - **Maintenance-window mode** — managed key `maintenanceWindow: { start, end, weekdays }` defining time slots where Niacin force-activates blind. Pairs with `forceActiveDuringDeploys` for "stay awake during the deploy IF it falls inside the window." (M)
 - **Wake-from-sleep for scheduled deploys** — register `pmset schedule wake` from a managed key so Niacin can wake the device for a deploy window. Coordinates with macOS Power Nap. (M)
@@ -34,11 +35,10 @@ Stream 3 follow-through. The `niacin://` URL scheme + `niacin run` wrapper shipp
 
 ---
 
-## v2.3 — AI workstation depth
+## v2.4 — AI workstation depth
 
-Process-presence detection + Ollama active-inference shipped in v2.0. This is the deeper trigger work.
+Process-presence detection + Ollama active-inference shipped in v2.0. Generalised HTTP probe registry (LM Studio, llama.cpp, text-generation-webui, ComfyUI) + MCP server shipped in v2.1. This is the deeper trigger work.
 
-- **Active-inference for non-Ollama runtimes** ★ — poll LM Studio (`:1234`), llama.cpp server, vLLM, mlx-lm APIs the same way the Ollama probe handles `/api/ps`. (M)
 - **GPU / Neural Engine load trigger** — sample via `powermetrics --samplers gpu_power,ane_power` or IOKit. Stay awake while ANE or GPU > threshold for sustained period. Faster signal than CPU for AI workloads. (M–L)
 - **Memory-pressure trigger** — wired-pages > N GB or sustained memory pressure indicates a model is loaded. Faster signal than process detection. (M)
 - **"AI workstation mode" preset** — one-click profile: indefinite activation, system-stays-awake but display-can-sleep, ignores lid close, "AI training in progress" tooltip. (S)
@@ -46,8 +46,7 @@ Process-presence detection + Ollama active-inference shipped in v2.0. This is th
 - **Thermal observability** — surface in tooltip when CPU/GPU sustained > 90°C for 10+ min. Doesn't change behaviour, just informs. AI on fanless minis can quietly thermal-throttle. (S)
 - **Notification when long jobs complete** — when a watched AI process exits, fire a UserNotification with sound. "Ollama has been idle for 5 min. Niacin can let the system sleep." (S)
 - **Battery-protective AI mode** — refuse force-activation triggers when on battery + battery < 50%, with an explicit override. AI inference on battery is brutal; a guardrail for laptop AI users. (S)
-
-- **MCP server mode** ★ — expose Niacin as a Model Context Protocol server so Claude / Cursor / Aider / Continue.dev can call `niacin.keep_awake_for(minutes, reason)` before kicking off a long tool call. ~100 lines of Swift + the MCP SDK. Nobody else has it. Could land standalone in v2.4 or fold into the AI workstation depth release. (M)
+- **MCP transport: stdio proxy** — small standalone binary (Homebrew distribution) that bridges stdio MCP clients to the HTTP server. For clients that don't yet speak HTTP transport. (S–M)
 
 ---
 
@@ -82,13 +81,25 @@ Cross-cutting items that don't fit cleanly into one stream.
 
 ## Code health
 
-- **Don't re-enable App Sandbox without a plan for Sparkle** — `ENABLE_APP_SANDBOX = NO` was set in v1.5 because sandboxed Sparkle can't acquire the admin rights needed to replace `/Applications/Niacin.app`. Re-enabling requires either restricting installs to `~/Applications` (UX hostile) or shipping an SMJobBless privileged helper (days of work). If a future App Store distribution is needed, that's a parallel build target, not a flip of this flag.
+- (nothing pressing — Sparkle/sandbox tension dissolved in v2.1; Enterprise + MAS configurations now coexist in a single target via `MAS_BUILD` compilation condition.)
 
 ---
 
+## Shipped in v2.1 (for the changelog)
+
+For the release notes:
+
+- ★ **MCP server** — Niacin exposes a localhost-only Model Context Protocol endpoint so AI agents (Claude Desktop, Claude Code, Cursor) can call `keep_awake`, `release_awake`, and `status` directly. Bearer-token auth, Keychain-stored. Opt-in via Settings. The single way agents drive keep-awake — replaces v2.0's process-scan-for-AI-runtimes heuristic.
+- ★ **One sandboxed build, two distribution channels.** Same binary ships as GitHub `.dmg`/`.pkg` (Developer-ID signed) and through the Mac App Store. App Sandbox always on, `network.server` for the MCP listener, no other elevated entitlements.
+- **Sparkle removal** — auto-update via Sparkle replaced by the App Store's mechanism (for users on the MAS build) or IT-managed pushes (for users on the GitHub channel). Drops EdDSA key management, appcast hosting, and ~300 lines of auto-update plumbing.
+- **AI runtime auto-detect retired** — the `aiRuntimeAutoAwake` managed key, the Settings toggle, the hardcoded AI process list, the HTTP probe registry, and the Ollama active-inference probe are all gone.
+- **ProcessWatcher retired** — `forceActiveDuringDeploys` and `forceActiveDuringApps` managed keys are gone. `sysctl(KERN_PROC_ALL)` is sandbox-forbidden, and the IT use case ("don't sleep during overnight deploys") is better served by `pmset schedule wake` from MDM.
+- **Menu UI for MCP sessions** — when an agent holds a `keep_awake`, the menu shows "Active for: · MCP: <client> · <remaining> — release" with a click-to-release control. Menu bar countdown picks the soonest deadline across user-initiated and MCP-initiated holds.
+- README + RELEASING.md rewritten around the single-build, dual-channel model.
+
 ## Shipped in v2.0 (for the changelog)
 
-For the release notes / appcast description:
+For the release notes:
 
 - ★ `niacin://` URL scheme — every automation tool the user already owns (Calendar reminders, Shortcuts, Stream Deck, webhooks) instantly becomes a Niacin trigger
 - ★ `niacin run -- <command>` wrapper — replaces `caffeinate -i ./long-job.sh` with a version that surfaces in the menu bar and auto-deactivates on exit
@@ -97,9 +108,7 @@ For the release notes / appcast description:
 - ★ `forceActiveDuringDeploys` managed key — IT-deploy daemons silently keep the device awake mid-deploy (jamf, installd, softwareupdated, munki, IntuneMdmAgent, mdmclient, Installer)
 - `forceActiveDuringApps` managed key — same shape for general apps (Zoom, Teams, OBS, etc.)
 - MDM audit log via `os.Logger` — `force-active begin/end reason=… matches=…` greppable via `log show`
-- Sparkle: daily update checks, no user opt-out (MDM `disableAutoUpdate` still the only escape hatch)
-- Sparkle: system profiling enabled — OS / CPU arch / RAM / locale telemetry on appcast fetches; documented in README
 - Gentle countdown end — last 30 s turns orange in the menu bar; optional sound (`warnSoundOnExpiry`)
 - Sample `.mobileconfig` in `examples/` for JAMF/Kandji/Mosyle/Intune deployment
-- README "For IT admins" section + update-telemetry transparency note
+- README "For IT admins" section
 - Info.plist Copy Bundle Resources double-listing fixed

@@ -1,16 +1,21 @@
 #!/usr/bin/env bash
 #
-# scripts/release.sh — build a signed, notarized Niacin release.
+# scripts/release.sh — build a signed, notarized Niacin release for the
+# GitHub Releases channel.
 #
 # Produces both a .dmg (drag-to-Applications) and a .pkg (Installer.app
 # / MDM-friendly) in build/release/artifacts/, plus a SHA-256 sums file
 # and a ready-to-paste `gh release create` command at the end.
 #
+# The Mac App Store build comes from the same sandboxed binary but is
+# uploaded via Xcode Organizer (Archive → Distribute → App Store Connect),
+# not by this script.
+#
 # Usage:
 #     ./scripts/release.sh VERSION
 #
 # Example:
-#     ./scripts/release.sh 1.2
+#     ./scripts/release.sh 2.1
 #
 # The VERSION arg must match MARKETING_VERSION in project.pbxproj — bump
 # the project version (and commit) first, then run this.
@@ -70,7 +75,6 @@ ARTIFACT_DIR="$BUILD_DIR/artifacts"
 APP="$EXPORT_DIR/niacin.app"
 DMG="$ARTIFACT_DIR/niacin-${VERSION}.dmg"
 PKG="$ARTIFACT_DIR/niacin-${VERSION}.pkg"
-ZIP="$ARTIFACT_DIR/niacin-${VERSION}.zip"
 
 step() { printf "\n\033[1;36m▶ %s\033[0m\n" "$*"; }
 fail() { printf "\033[1;31m✗ %s\033[0m\n" "$*" >&2; exit 1; }
@@ -156,25 +160,6 @@ xcrun notarytool submit "$APP_ZIP" \
 step "Stapling notarization ticket to .app"
 xcrun stapler staple "$APP"
 
-# ─── Sparkle .zip (the auto-update artifact) ───────────────────────────
-#
-# The embedded .app is already notarized + stapled, so the .zip itself
-# does NOT need its own notarization round. Sparkle just downloads it,
-# extracts the .app, verifies the EdDSA signature against the public
-# key in Info.plist, and replaces the running app.
-
-step "Building Sparkle .zip"
-ditto -c -k --keepParent "$APP" "$ZIP"
-
-step "Signing .zip with Sparkle EdDSA key"
-SIGN_UPDATE=$(find ~/Library/Developer/Xcode/DerivedData -name sign_update -path '*Sparkle*' 2>/dev/null | head -1)
-[ -x "$SIGN_UPDATE" ] || fail "sign_update not found. Build the project once in Xcode so SPM resolves Sparkle, then re-run."
-SIGN_OUTPUT=$("$SIGN_UPDATE" "$ZIP")
-# sign_update prints something like: sparkle:edSignature="..." length="..."
-EDSIGNATURE=$(printf '%s' "$SIGN_OUTPUT" | sed -n 's/.*sparkle:edSignature="\([^"]*\)".*/\1/p')
-LENGTH=$(printf '%s' "$SIGN_OUTPUT" | sed -n 's/.*length="\([^"]*\)".*/\1/p')
-[ -n "$EDSIGNATURE" ] && [ -n "$LENGTH" ] || fail "could not parse sign_update output: $SIGN_OUTPUT"
-
 # ─── Build, sign, notarize, staple .dmg ────────────────────────────────
 
 step "Building .dmg"
@@ -225,11 +210,9 @@ spctl --assess --type install --verbose "$PKG"
 # ─── Checksums ─────────────────────────────────────────────────────────
 
 step "Computing SHA-256 sums"
-( cd "$ARTIFACT_DIR" && shasum -a 256 *.dmg *.pkg *.zip > SHA256SUMS )
+( cd "$ARTIFACT_DIR" && shasum -a 256 *.dmg *.pkg > SHA256SUMS )
 
 # ─── Summary ───────────────────────────────────────────────────────────
-
-PUBDATE=$(date -u "+%a, %d %b %Y %H:%M:%S +0000")
 
 cat <<EOF
 
@@ -237,24 +220,7 @@ cat <<EOF
 ✓ Release artifacts ready:
     $DMG
     $PKG
-    $ZIP   ← Sparkle update artifact
     $ARTIFACT_DIR/SHA256SUMS
-
-Appcast <item> snippet — paste into appcast.xml as the newest <item>,
-then upload appcast.xml to https://niacin.dort.zone/appcast.xml :
-
-        <item>
-            <title>Niacin $VERSION</title>
-            <pubDate>$PUBDATE</pubDate>
-            <sparkle:version>$(grep -m1 "CURRENT_PROJECT_VERSION" "$PROJECT/project.pbxproj" | sed 's/.*= //;s/;//' | tr -d '[:space:]')</sparkle:version>
-            <sparkle:shortVersionString>$VERSION</sparkle:shortVersionString>
-            <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
-            <enclosure
-                url="https://github.com/just-an-oldsalt/niacin/releases/download/v$VERSION/niacin-$VERSION.zip"
-                length="$LENGTH"
-                type="application/octet-stream"
-                sparkle:edSignature="$EDSIGNATURE" />
-        </item>
 
 To publish to GitHub:
 
@@ -265,7 +231,6 @@ To publish to GitHub:
         --generate-notes \\
         "$DMG" \\
         "$PKG" \\
-        "$ZIP" \\
         "$ARTIFACT_DIR/SHA256SUMS"
 
 (If v$VERSION is already pushed, skip the first two lines.)

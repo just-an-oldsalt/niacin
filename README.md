@@ -1,8 +1,10 @@
 # ☕ Niacin
 
-**[niacin.dort.zone](https://niacin.dort.zone/) · A macOS menu bar utility that keeps your Mac awake — built for enterprise.**
+**[niacin.dort.zone](https://niacin.dort.zone/) · A macOS menu bar utility that keeps your computer awake — driven by you, or by your AI agents.**
 
-Niacin prevents your Mac from sleeping on demand, with fine-grained control over what stays awake: the system, the display, or both. Every setting can be locked and enforced by IT via a JAMF (or any MDM) managed preferences plist.
+Niacin prevents your computer from sleeping on demand, with fine-grained control over what stays awake: the system, the display, or both. Every setting can be locked and enforced by IT via a JAMF (or any MDM) managed preferences plist. AI agents that speak the Model Context Protocol can drive Niacin directly via a localhost-only MCP endpoint.
+
+One sandboxed build, distributed two ways: as `.dmg` / `.pkg` from this repo's GitHub Releases, and through the Mac App Store. Same binary, same bundle ID, same feature set.
 
 ---
 
@@ -11,26 +13,25 @@ Niacin prevents your Mac from sleeping on demand, with fine-grained control over
 - **Menu bar first** — lives in your menu bar, no Dock icon, no clutter
 - **Flexible sleep control** — choose between full awake, system-only awake, or lock prevention per activation
 - **Timed activations** — activate for 5 minutes up to indefinitely, or set a hard cap via policy
-- **Two independent modes** configurable from the menu:
-  - `Allow screen to sleep` — system stays awake, display can dim and lock per company policy
-  - `Prevent device from locking` — keeps display on, no screensaver, no lock screen
-- **Enterprise-ready** — every setting manageable via a single MDM plist
+- **AI-agent native** — local MCP server lets Claude Desktop, Claude Code, Cursor, and other MCP clients request keep-awake assertions directly via the `keep_awake` tool, with bearer-token auth
+- **Manageable via MDM** — every setting locked and enforced by a JAMF (or any MDM) managed preferences plist
 - **Lock indicators** — settings controlled by IT show a 🔒 icon; users can't override them
 - **Managed policy section** — settings window surfaces active IT constraints clearly
+- **Sandboxed** — App Sandbox on, hardened runtime on, only entitlement beyond defaults is `com.apple.security.network.server` for the MCP listener (loopback-bound)
 
 ---
 
 ## How it works
 
-Niacin wraps macOS's built-in `caffeinate` command:
+Niacin holds IOKit power assertions (`IOPMAssertionCreateWithName`) directly — no spawned `caffeinate` children, no kernel extensions, no background daemons. Assertions release automatically if the process dies, so a crash or forced quit can't leak a stuck "stay awake" state.
 
-| Mode | Flag | Effect |
+| Mode | Assertion type | Effect |
 |---|---|---|
-| Full awake | `-di` | Prevents display sleep and system idle sleep |
-| System awake only | `-i` | Prevents system sleep; display can sleep and lock |
-| Timed activation | `-t N` | Automatically deactivates after N seconds |
+| Full awake | `PreventUserIdleSystemSleep` + `PreventUserIdleDisplaySleep` | System and display stay on |
+| System awake only | `PreventUserIdleSystemSleep` | System stays awake; display can sleep and lock |
+| Timed activation | (above, plus an internal timer) | Niacin releases the assertion at the deadline |
 
-No background daemons, no kernel extensions — just a thin Swift wrapper around a tool Apple ships on every Mac.
+MCP-driven sessions are held separately from user-initiated assertions, so a user-ended session can't drop an in-progress agent's keep-awake — and vice versa.
 
 ---
 
@@ -78,10 +79,7 @@ Any key present in the managed domain overrides the user's preference and locks 
 | `deactivateOnUserSwitch` | Bool | *(user)* | Deactivate automatically on fast user switch |
 | `maxDurationSeconds` | Integer | *(none)* | Hard cap on any single activation (seconds) |
 | `allowedDurations` | Array of Integer | *(defaults)* | Override the available duration list entirely |
-| `disableAutoUpdate` | Bool | `false` | Disable Sparkle auto-update entirely. When `true`: no background checks, the menu bar "Check for Updates…" item is hidden, and the "Check Now" button in Settings is disabled. This is the only opt-out — Niacin otherwise checks for updates daily with no user-facing toggle. Most managed orgs push updates via JAMF and want to suppress self-updates |
-| `forceActiveDuringDeploys` | Array of String | *(empty)* | Process-name patterns that, when matched against a running process, force Niacin awake silently. Designed for IT-deploy daemons (`jamf`, `installd`, `softwareupdated`, `munki`, `IntuneMdmAgent`, `mdmclient`, `Installer`) — the device won't sleep mid-deploy even if the user is away. Polled every 5 seconds. Names are case-insensitive substring matches against `kinfo_proc.p_comm`, kernel-limited to 16 chars |
-| `forceActiveDuringApps` | Array of String | *(empty)* | Same shape as `forceActiveDuringDeploys` but for general apps (`zoom.us`, `OBS`, `obs-studio`, etc.). Force-activates while any matching process is running |
-| `aiRuntimeAutoAwake` | Bool | `false` | Auto-detect known local-AI runtimes (Ollama, LM Studio, llama.cpp server, MLX, ComfyUI, InvokeAI, Stable Diffusion WebUI, vLLM, etc.) and force-activate while any is loaded. For Ollama specifically, an additional active-inference probe polls `http://127.0.0.1:11434/api/ps` every 30 s — if no model has been loaded into VRAM for 5+ minutes, force-active is released so the device can sleep. Off by default to avoid surprising users running Ollama as a launchd service; the AI-workstation audience can flip the Settings toggle, and IT can enforce on fleet-wide with `true` here |
+| `mcpServerEnabled` | Bool | `false` | Enable the local MCP (Model Context Protocol) server. When `true`: Niacin binds an HTTP listener on `127.0.0.1` (port 11473 by default) so paired AI agents — Claude Desktop, Claude Code, Cursor — can call the `keep_awake`, `release_awake`, and `status` tools via bearer-token-authenticated JSON-RPC. The token is user-generated in Settings and stored in Keychain. No external traffic. |
 
 ### Example plist
 
@@ -134,37 +132,9 @@ A typical enterprise deployment that keeps the system awake but enforces screen 
     <key>allowIndefinite</key>
     <false/>
 
-    <!-- IT pushes updates via JAMF; users cannot self-update -->
-    <key>disableAutoUpdate</key>
-    <true/>
-
 </dict>
 </plist>
 ```
-
-### Auto-update lockdown only
-
-If you only need to disable Sparkle's self-update mechanism (because IT pushes builds via JAMF / Munki / Intune) and want to leave every other setting under user control:
-
-```xml
-<?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
-  "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<plist version="1.0">
-<dict>
-    <key>disableAutoUpdate</key>
-    <true/>
-</dict>
-</plist>
-```
-
-When this key is set, Niacin will:
-
-- Skip background update checks entirely
-- Hide the "Check for Updates…" item from the menu bar menu
-- Disable the "Check Now" button in Settings and show "Auto-updates disabled by your organisation" alongside it
-- Surface an "Auto-updates disabled by policy" indicator in the Managed-by-Organisation section
-- React to the policy live via the file watcher — flipping the key on or off in the deployed plist takes effect within ~200 ms without restarting the app
 
 ### Kiosk / display mode example
 
@@ -212,17 +182,15 @@ macOS will write the plist to `/Library/Managed Preferences/` and Niacin will pi
 
 ## For IT admins
 
-If your job is to keep a fleet of Macs awake during overnight deploys, the v2.0 release adds three force-activation triggers designed for unattended use:
+For IT teams using Niacin in managed fleets, the relevant signals are:
 
-- **`forceActiveDuringDeploys`** — Niacin silently keeps the device awake while any of your configured deploy daemons are running (`jamf`, `installd`, `softwareupdated`, `munki`, `IntuneMdmAgent`, `mdmclient`, `Installer`). No menu bar flicker, no user prompt — the user wakes up to a finished deploy instead of a half-applied update.
-- **`forceActiveDuringApps`** — same shape for any user-facing app where sleep-during-use is unacceptable (Zoom, Teams, OBS, custom internal tools).
-- **`aiRuntimeAutoAwake`** — auto-detects locally-running AI runtimes (Ollama, LM Studio, llama.cpp server, MLX, ComfyUI, InvokeAI, Stable Diffusion WebUI, vLLM, mistralrs) and keeps the system awake while any is loaded. For Ollama, an active-inference probe additionally drops force-active when no model has been loaded into VRAM for 5+ minutes — Ollama-as-a-launchd-service won't keep the box awake 24/7. Off by default; users can opt in via Settings, or IT can enforce on fleet-wide by setting this key to `true`.
-
-All three are independent of the user's manual session — they hold their own IOKit power assertions. macOS composes them with anything the user has running, so a deploy can complete after the user has manually deactivated for the night.
+- Every behaviour controlled by a single managed-preferences plist (see the table above). Profile pushes take effect within ~200 ms — no logout cycle needed.
+- Audit log of every activation event, greppable via `log show`.
+- `mcpServerEnabled` lets agents drive keep-awake explicitly. If you need "stay awake during overnight deploys," set up `pmset schedule wake` from your MDM and pair it with `activateOnLaunch=true` plus a `maxDurationSeconds` cap; Niacin no longer scans `sysctl` for deploy daemons (sandbox forbids it, and `pmset` is the macOS-blessed mechanism anyway).
 
 ### Sample Configuration Profile
 
-A ready-to-customise `.mobileconfig` is in [`examples/niacin.mobileconfig`](examples/niacin.mobileconfig). It includes all the force-active keys plus the standard enterprise lockdown (`disableAutoUpdate`, `maxDurationSeconds`, `allowIndefinite=false`, etc.). Before pushing:
+A ready-to-customise `.mobileconfig` is in [`examples/niacin.mobileconfig`](examples/niacin.mobileconfig). It includes all the force-active keys plus the standard enterprise lockdown (`maxDurationSeconds`, `allowIndefinite=false`, etc.). Before pushing:
 
 1. Replace the three `PayloadUUID` values with fresh ones from `uuidgen`
 2. Replace `YOUR-ORG` in `PayloadOrganization` with your org name
@@ -351,16 +319,44 @@ macOS retains unified log output for approximately 7 days by default. For longer
 
 ---
 
-## Update checks and telemetry
+## Updates
 
-Niacin checks for updates once every 24 hours via Sparkle. The interval is fixed; there is no user-facing toggle to disable or slow down checks. Managed deployments can suppress checks entirely with `disableAutoUpdate` (see [MDM / JAMF Configuration](#mdm--jamf-configuration)).
+**Niacin Enterprise** has no self-update. IT pushes new versions via MDM as `.pkg` files. The build does not phone home for update checks.
 
-Each check is an HTTPS `GET` of the appcast at `https://niacin.dort.zone/appcast.xml`. Every request includes:
+**Niacin** (Mac App Store) updates through the App Store's standard mechanism. No code in Niacin contacts an update server.
 
-- **`User-Agent`** — `Niacin/<version> Sparkle/<sparkle-version>`. The server learns the current installed version.
-- **System profile query parameters** — `appName`, `appVersion`, `osVersion`, `cputype`, `cpusubtype`, `model`, `ncpu`, `ramMB`, `cpuFreqMHz`, `lang`. No identifiers, no per-user state, no installation IDs. This is Sparkle's built-in `SUEnableSystemProfiling` and is used to make minimum-OS and architecture-support decisions (e.g. when to drop Intel, what the median RAM looks like for AI-workstation users).
+---
 
-Set `disableAutoUpdate=true` via MDM if your organisation's policy is to suppress all outbound update traffic.
+## AI agent integration (MCP)
+
+Enable the MCP server in **Settings → AI Agent Integration**. Niacin will:
+
+1. Bind a localhost-only HTTP listener (default port `11473`, falls back through `11479` if the default is taken).
+2. Generate a bearer token shown once after creation, then stored in Keychain.
+3. Surface a **Copy Config Snippet** button that produces a paste-ready JSON block for MCP clients.
+
+The snippet has the shape MCP-over-HTTP clients expect:
+
+```json
+{
+  "mcpServers": {
+    "niacin": {
+      "url": "http://127.0.0.1:11473",
+      "headers": { "Authorization": "Bearer <token>" }
+    }
+  }
+}
+```
+
+### Exposed tools
+
+| Tool | Arguments | Effect |
+|---|---|---|
+| `keep_awake` | `duration_seconds?` (int), `reason` (string), `allow_display_sleep?` (bool), `client?` (string) | Holds a power assertion. Returns `session_id` and `expires_at`. |
+| `release_awake` | `session_id?` (string) | Releases one session, or all MCP-owned sessions if omitted. |
+| `status` | — | Reports current keep-awake state and the labels of all sources holding assertions. |
+
+Every call is logged under `subsystem="com.oldsalt.niacin" category="audit"` with the calling client's self-reported name (when supplied) and the reason text. Sessions self-release at their declared duration via a wall-clock task that survives system sleep.
 
 ---
 

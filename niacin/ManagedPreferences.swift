@@ -53,13 +53,6 @@ struct ManagedPreferences {
     // Remove Quit from the menu bar menu
     static var disableQuit: Bool             { bool("disableQuit") ?? false }
 
-    // Disable Sparkle auto-update entirely. When true: no background checks,
-    // the menu bar "Check for Updates…" item is hidden, and the "Check Now"
-    // button in Settings is disabled. Most managed orgs push updates via JAMF
-    // and want to suppress self-updates. This is the only opt-out — Niacin
-    // otherwise checks for updates daily with no user-facing toggle.
-    static var disableAutoUpdate: Bool       { bool("disableAutoUpdate") ?? false }
-
     // Lock the display-sleep toggle; nil means user-controlled
     // When false, the display stays on (-d flag added to caffeinate)
     static var allowDisplaySleep: Bool?      { bool("allowDisplaySleep") }
@@ -81,64 +74,20 @@ struct ManagedPreferences {
         return ints.isEmpty ? nil : ints
     }
 
-    // ─── Force-active triggers (v2.0) ──────────────────────────────────
-    //
-    // Three independent process-name watch lists. When any matches a
-    // running process, Niacin silently force-activates regardless of
-    // whether the user has a session of their own. Process names are
-    // matched case-insensitively as substrings against kinfo_proc's
-    // p_comm (kernel-limited to 16 chars). Watch needles must fit.
+    // Whether the MCP (Model Context Protocol) server is allowed to run.
+    // When true, Niacin binds an HTTP listener on 127.0.0.1 so AI agents
+    // (Claude Desktop, Cursor, Claude Code, …) can request keep-awake
+    // assertions directly via the `keep_awake` tool. Bearer-token auth
+    // required on every request. Managed-only — nil means user-controlled.
+    static var mcpServerEnabled: Bool? { bool("mcpServerEnabled") }
 
-    // IT-managed list of deploy daemons (jamf, installd, softwareupdated,
-    // munki, IntuneMdmAgent, mdmclient, Installer, etc.). The use case is
-    // "don't sleep mid-deploy while JAMF pushes overnight". Empty array by
-    // default — IT must opt in by specifying processes.
-    static var forceActiveDuringDeploys: [String] {
-        (managedValue("forceActiveDuringDeploys") as? [Any])?
-            .compactMap { $0 as? String } ?? []
+    // Effective value for the MCP server toggle: managed > user-defaults
+    // > built-in default (false). Off by default — the server is opt-in
+    // because it exposes a network listener (loopback only, but still).
+    static var resolvedMCPServerEnabled: Bool {
+        if let managed = mcpServerEnabled { return managed }
+        return UserDefaults.standard.bool(forKey: "mcpServerEnabled")
     }
-
-    // IT or user-managed list of arbitrary apps that should keep the
-    // device awake while running (Zoom, Teams, OBS, etc.). Empty array
-    // by default.
-    static var forceActiveDuringApps: [String] {
-        (managedValue("forceActiveDuringApps") as? [Any])?
-            .compactMap { $0 as? String } ?? []
-    }
-
-    // Whether to auto-detect known AI runtimes (Ollama, LM Studio,
-    // llama.cpp server, ComfyUI, etc.) and keep the device awake while
-    // they're loaded. The list is hardcoded (see defaultAIRuntimeProcesses).
-    // Managed-only — nil means user-controlled (resolves via
-    // resolvedAIRuntimeAutoAwake below). When managed, MDM wins.
-    static var aiRuntimeAutoAwake: Bool? { bool("aiRuntimeAutoAwake") }
-
-    // The effective value used by the AI watcher and Ollama inference probe:
-    // managed > user-defaults > built-in default (false). Off by default —
-    // process-presence detection alone would keep launchd-managed Ollama
-    // installs awake 24/7, which surprises users who didn't opt in. The AI
-    // workstation audience that wants this on can flip the Settings toggle
-    // (or IT can enforce it fleet-wide via the managed key).
-    static var resolvedAIRuntimeAutoAwake: Bool {
-        if let managed = aiRuntimeAutoAwake { return managed }
-        return UserDefaults.standard.bool(forKey: "aiRuntimeAutoAwake")
-    }
-
-    // Known local-AI runtime process names. Case-insensitive substring
-    // match against p_comm. Truncation-aware — names that the kernel
-    // would chop are entered in their post-truncation form.
-    static let defaultAIRuntimeProcesses: [String] = [
-        "ollama",
-        "LM Studio",
-        "llama-server",
-        "mlx-lm",
-        "mlx_lm.server",
-        "ComfyUI",
-        "InvokeAI",
-        "stable-diffu",       // stable-diffusion-webui, truncated
-        "mistralrs",          // mistralrs-server, truncated
-        "vllm",
-    ]
 
     // True only if the key is set in a managed preferences plist (vs. user
     // defaults) — drives lock icons.

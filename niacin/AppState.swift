@@ -2,7 +2,6 @@ import Foundation
 import AppKit
 import OSLog
 import IOKit.pwr_mgt
-import Sparkle
 
 private let log = Logger(subsystem: "com.oldsalt.niacin", category: "policy")
 private let auditLog = Logger(subsystem: "com.oldsalt.niacin", category: "audit")
@@ -16,46 +15,24 @@ final class AppState {
     private var hasLaunched = false
     private var countdownTimer: Timer?
     private let policyWatcher = PolicyWatcher()
-    private(set) var updater: SPUUpdater?
 
-    // ─── Force-active state (v2.0) ─────────────────────────────────────
+    // ─── Force-active state ────────────────────────────────────────────
     //
-    // Three independent ProcessWatchers feed into one set of IOKit power
-    // assertions held by AppState itself (separate from the user-session
-    // assertions held by `preventer`). When any watcher has matches, the
-    // force-active assertion is held; macOS composes both assertion pairs
-    // so the system stays awake whether the user activated manually OR a
-    // watcher matched, OR both.
-    private var deployWatcher: ProcessWatcher?
-    private var appWatcher: ProcessWatcher?
-    private var aiWatcher: ProcessWatcher?
-    private var ollamaProbe: OllamaInferenceProbe?
-
-    private(set) var deployMatches: Set<String> = []
-    private(set) var appMatches: Set<String> = []
-    private(set) var aiRuntimeMatches: Set<String> = []
-    // True when Ollama's /api/ps endpoint has reported an empty models array
-    // for 5+ minutes — Ollama is running but no model is loaded into VRAM.
-    // While true, any Ollama-matching entries in aiRuntimeMatches are filtered
-    // out of effectiveAIRuntimeMatches so the system can sleep.
-    private(set) var ollamaIdle: Bool = false
+    // MCP sessions feed into a shared IOKit power-assertion pair (held by
+    // AppState, separate from the user-session assertions in `preventer`).
+    // macOS composes both pairs, so the system stays awake whether the user
+    // activated manually OR an MCP client is holding `keep_awake`, OR both.
+    // Sessions self-release after their declared duration via per-session
+    // Task watchdogs.
+    private(set) var mcpSessions: [String: MCPSession] = [:]
+    private var mcpSessionTasks: [String: Task<Void, Never>] = [:]
+    private(set) var mcpServer: MCPServer?
 
     private var forceActiveSystemAssertion: IOPMAssertionID = 0
     private var forceActiveDisplayAssertion: IOPMAssertionID = 0
 
-    // Process-presence AI matches with Ollama removed if active-inference
-    // detection has declared it idle. This is the signal that actually drives
-    // force-active state — aiRuntimeMatches stays as the raw process list for
-    // observability.
-    var effectiveAIRuntimeMatches: Set<String> {
-        if ollamaIdle {
-            return aiRuntimeMatches.filter { !$0.lowercased().contains("ollama") }
-        }
-        return aiRuntimeMatches
-    }
-
     var hasForceActive: Bool {
-        !deployMatches.isEmpty || !appMatches.isEmpty || !effectiveAIRuntimeMatches.isEmpty
+        !mcpSessions.isEmpty
     }
 
     // True if Niacin is keeping the system awake for *any* reason — user
@@ -134,7 +111,7 @@ final class AppState {
             // didn't switch to the "active" state.
             tooltipText = String(localized: "Niacin — Error: \(err)")
         } else {
-            startCountdownTimer(timed: duration.timeInterval != nil)
+            refreshCountdownTimer()
         }
     }
 
@@ -146,7 +123,7 @@ final class AppState {
         log.info("deactivating (user request)")
         auditLog.info("deactivation: source=user")
         preventer.deactivate()
-        stopCountdownTimer()
+        refreshCountdownTimer()
         updateTooltipForForceActive()  // refresh in case force-active is still running
     }
 
@@ -163,7 +140,7 @@ final class AppState {
         hasLaunched = true
 
         sweepOrphanCaffeinate()
-        startProcessWatchers()
+        refreshMCPServer()
 
         let shouldActivate = ManagedPreferences.activateOnLaunch
             ?? UserDefaults.standard.bool(forKey: "activateOnLaunch")
@@ -182,78 +159,34 @@ final class AppState {
         startPolicyWatcher()
     }
 
-    // ─── Force-active watchers (v2.0) ──────────────────────────────────
+    // MARK: - MCP server lifecycle
 
-    private func startProcessWatchers() {
-        deployWatcher = ProcessWatcher(
-            name: "deploy",
-            needlesProvider: { ManagedPreferences.forceActiveDuringDeploys }
-        ) { [weak self] matches in
-            self?.handleWatcherChange(reason: "deploy", matches: matches)
+    func startMCPServer() {
+        guard mcpServer == nil else { return }
+        let server = MCPServer(delegate: self)
+        do {
+            try server.start()
+            mcpServer = server
+            log.info("mcp server started on port \(server.actualPort ?? 0, privacy: .public)")
+        } catch {
+            log.error("mcp server failed to start: \(error.localizedDescription, privacy: .public)")
         }
-        deployWatcher?.start()
-
-        appWatcher = ProcessWatcher(
-            name: "apps",
-            needlesProvider: { ManagedPreferences.forceActiveDuringApps }
-        ) { [weak self] matches in
-            self?.handleWatcherChange(reason: "app", matches: matches)
-        }
-        appWatcher?.start()
-
-        aiWatcher = ProcessWatcher(
-            name: "ai-runtime",
-            needlesProvider: {
-                ManagedPreferences.resolvedAIRuntimeAutoAwake
-                    ? ManagedPreferences.defaultAIRuntimeProcesses
-                    : []
-            }
-        ) { [weak self] matches in
-            self?.handleWatcherChange(reason: "ai-runtime", matches: matches)
-        }
-        aiWatcher?.start()
-
-        // Active-inference refinement layer for Ollama. The aiWatcher above
-        // catches "ollama process is running"; this probe answers "is Ollama
-        // actually doing anything". When Ollama has been idle (no model in
-        // VRAM) for the grace window, the probe sets ollamaIdle=true and
-        // Ollama-matching entries drop out of effectiveAIRuntimeMatches.
-        ollamaProbe = OllamaInferenceProbe { [weak self] idle in
-            guard let self else { return }
-            guard self.ollamaIdle != idle else { return }
-            self.ollamaIdle = idle
-            auditLog.info("ollama-inference: idle=\(idle, privacy: .public)")
-            self.recomputeForceActiveAssertion()
-            self.updateTooltipForForceActive()
-        }
-        ollamaProbe?.start()
     }
 
-    private func handleWatcherChange(reason: String, matches: Set<String>) {
-        switch reason {
-        case "deploy":     deployMatches = matches
-        case "app":        appMatches = matches
-        case "ai-runtime":
-            aiRuntimeMatches = matches
-            // If Ollama disappeared from the running-process list, reset the
-            // probe's idle conclusion so a fresh Ollama launch isn't
-            // suppressed by stale state from a prior session.
-            let hasOllama = matches.contains(where: { $0.lowercased().contains("ollama") })
-            if !hasOllama && ollamaIdle {
-                ollamaIdle = false
-            }
-        default: return
-        }
+    func stopMCPServer() {
+        mcpServer?.stop()
+        mcpServer = nil
+        // Stopping the listener doesn't tear down outstanding sessions —
+        // assertions stay held until they expire or are released by API.
+    }
 
-        // Structured audit-log entry that IT can grep for via `log show`.
-        if matches.isEmpty {
-            auditLog.info("force-active end: reason=\(reason, privacy: .public)")
-        } else {
-            auditLog.info("force-active begin: reason=\(reason, privacy: .public) matches=\(matches.sorted(), privacy: .public)")
+    func refreshMCPServer() {
+        let wantedOn = ManagedPreferences.resolvedMCPServerEnabled
+        if wantedOn && mcpServer == nil {
+            startMCPServer()
+        } else if !wantedOn && mcpServer != nil {
+            stopMCPServer()
         }
-
-        recomputeForceActiveAssertion()
-        updateTooltipForForceActive()
     }
 
     // Hold IOKit assertions for force-active reasons. These are independent
@@ -265,7 +198,7 @@ final class AppState {
         if hasForceActive {
             // Acquire (idempotent — release first if already held).
             if forceActiveSystemAssertion == 0 {
-                let reason = "Niacin force-active (deploy / app / AI runtime)" as CFString
+                let reason = "Niacin force-active (MCP session)" as CFString
                 var sys: IOPMAssertionID = 0
                 let r1 = IOPMAssertionCreateWithName(
                     kIOPMAssertionTypePreventUserIdleSystemSleep as CFString,
@@ -312,12 +245,7 @@ final class AppState {
         guard !preventer.isActive else { return }
 
         if hasForceActive {
-            let sources: [String] = [
-                deployMatches.isEmpty ? nil : "deploy",
-                appMatches.isEmpty ? nil : "app",
-                effectiveAIRuntimeMatches.isEmpty ? nil : "AI",
-            ].compactMap { $0 }
-            tooltipText = String(localized: "Niacin — Active for \(sources.joined(separator: ", "))")
+            tooltipText = String(localized: "Niacin — Active for MCP")
         } else {
             tooltipText = String(localized: "Niacin — Inactive")
         }
@@ -325,10 +253,10 @@ final class AppState {
 
     // One-shot cleanup for users upgrading from pre-v1.7 builds. Older
     // versions spawned `caffeinate` children that survived parent death and
-    // leaked power assertions across crashes / Sparkle updates / Force Quits.
-    // We kill any caffeinates still parented to launchd (PID 1) — those are
-    // orphans by definition. Caffeinates the user spawned themselves in a
-    // terminal have the shell as parent and are left alone.
+    // leaked power assertions across crashes / updates / Force Quits. We kill
+    // any caffeinates still parented to launchd (PID 1) — those are orphans by
+    // definition. Caffeinates the user spawned themselves in a terminal have
+    // the shell as parent and are left alone.
     //
     // From v1.7 onwards Niacin doesn't spawn caffeinate at all, so this only
     // matters during the upgrade transition. Safe to remove in a later release.
@@ -350,68 +278,85 @@ final class AppState {
             ?? UserDefaults.standard.bool(forKey: "deactivateOnUserSwitch")
         if shouldDeactivate {
             preventer.deactivate()
-            stopCountdownTimer()
+            refreshCountdownTimer()
         }
     }
 
-    private func startCountdownTimer(timed: Bool) {
-        stopCountdownTimer()
+    // Soonest expiry across every deadline-bearing source — user session and
+    // MCP sessions. Drives the menu bar countdown so an agent-requested
+    // `keep_awake(30 min)` ticks down the same way a user-initiated 30-minute
+    // session does.
+    var soonestDeadline: Date? {
+        var candidates: [Date] = []
+        if let u = preventer.activeUntil { candidates.append(u) }
+        candidates.append(contentsOf: mcpSessions.values.compactMap { $0.expiresAt })
+        return candidates.min()
+    }
+
+    // Identity tracker for the gentle-warning beep — when the soonest
+    // deadline changes (one session expires, another takes over), we reset
+    // `beepedForCurrentSession` so the next deadline gets its own warning.
+    private var lastSoonestDeadline: Date?
+
+    private func refreshCountdownTimer() {
+        let needsTicker = soonestDeadline != nil
+        if needsTicker && countdownTimer == nil {
+            let t = Timer(timeInterval: 1, repeats: true) { [weak self] _ in
+                Task { @MainActor [weak self] in self?.updateCountdown() }
+            }
+            RunLoop.main.add(t, forMode: .common)
+            countdownTimer = t
+        }
         updateCountdown()
-        guard timed else { return }
-        let timer = Timer(timeInterval: 1, repeats: true) { [weak self] _ in
-            Task { @MainActor [weak self] in self?.updateCountdown() }
-        }
-        RunLoop.main.add(timer, forMode: .common)
-        countdownTimer = timer
-    }
-
-    private func stopCountdownTimer() {
-        countdownTimer?.invalidate()
-        countdownTimer = nil
-        countdownText = nil
-        isExpiringSoon = false
-        beepedForCurrentSession = false
-        // If force-active is keeping us awake even after the user session
-        // ends, leave the tooltip in its force-active form. Only reset to
-        // "Inactive" when nothing is keeping the system awake.
-        if hasForceActive {
-            updateTooltipForForceActive()
-        } else {
-            tooltipText = String(localized: "Niacin — Inactive")
+        if !needsTicker {
+            countdownTimer?.invalidate()
+            countdownTimer = nil
         }
     }
 
     private func updateCountdown() {
-        guard preventer.isActive else { stopCountdownTimer(); return }
-        guard let until = preventer.activeUntil else {
-            countdownText = nil
-            isExpiringSoon = false
-            tooltipText = String(localized: "Niacin — Keeping you awake")
-            return
+        let deadline = soonestDeadline
+        if deadline != lastSoonestDeadline {
+            // New deadline (or none) — reset the gentle-warning latch so the
+            // next session gets its own 30 s beep.
+            beepedForCurrentSession = false
         }
-        let remaining = Int(until.timeIntervalSinceNow)
-        guard remaining > 0 else {
-            countdownText = nil
-            isExpiringSoon = false
-            tooltipText = String(localized: "Niacin — Keeping you awake")
-            return
-        }
+        lastSoonestDeadline = deadline
 
-        // Gentle countdown warning: ≤30s remaining flips isExpiringSoon
-        // (drives orange-text styling in the menu bar) and plays a beep
-        // once if the user opted into the sound preference.
-        let nowExpiring = remaining <= 30
-        if nowExpiring && !isExpiringSoon && !beepedForCurrentSession {
-            if UserDefaults.standard.bool(forKey: "warnSoundOnExpiry") {
-                NSSound.beep()
+        if let deadline {
+            let remaining = Int(deadline.timeIntervalSinceNow)
+            if remaining > 0 {
+                let nowExpiring = remaining <= 30
+                if nowExpiring && !isExpiringSoon && !beepedForCurrentSession {
+                    if UserDefaults.standard.bool(forKey: "warnSoundOnExpiry") {
+                        NSSound.beep()
+                    }
+                    beepedForCurrentSession = true
+                }
+                isExpiringSoon = nowExpiring
+
+                let formatted = Self.format(seconds: remaining)
+                countdownText = formatted
+                tooltipText = String(localized: "Niacin — \(formatted) remaining")
+                return
             }
-            beepedForCurrentSession = true
+            // Deadline passed — expect a cleanup callback shortly (preventer
+            // auto-deactivate or MCP session task). Clear the countdown and
+            // fall through to the no-deadline tooltip logic.
+            countdownText = nil
+            isExpiringSoon = false
+        } else {
+            countdownText = nil
+            isExpiringSoon = false
         }
-        isExpiringSoon = nowExpiring
 
-        let formatted = Self.format(seconds: remaining)
-        countdownText = formatted
-        tooltipText = String(localized: "Niacin — \(formatted) remaining")
+        if preventer.isActive {
+            tooltipText = String(localized: "Niacin — Keeping you awake")
+        } else if hasForceActive {
+            updateTooltipForForceActive()
+        } else {
+            tooltipText = String(localized: "Niacin — Inactive")
+        }
     }
 
     private static func format(seconds: Int) -> String {
@@ -472,7 +417,7 @@ final class AppState {
         // is needed — the next read will see the current plist contents.
         policyRevision += 1
         log.info("policyRevision=\(self.policyRevision, privacy: .public) isActive=\(self.preventer.isActive, privacy: .public) isEnabled=\(ManagedPreferences.isEnabled, privacy: .public)")
-        enforceAutoUpdatePolicy()
+        refreshMCPServer()
 
         guard preventer.isActive else { return }
 
@@ -482,38 +427,7 @@ final class AppState {
         if let reason = sessionIncompatibilityReason() {
             log.info("deactivating running session: \(reason, privacy: .public)")
             preventer.deactivate()
-            stopCountdownTimer()
-        }
-    }
-
-    // MARK: - Sparkle wiring
-
-    // Called once from NiacinApp.init after the SPUStandardUpdaterController
-    // is created. Lets AppState gate auto-checks on the managed-policy key.
-    func attachUpdater(_ updater: SPUUpdater) {
-        self.updater = updater
-        enforceAutoUpdatePolicy()
-        log.info("updater attached, autoCheck=\(updater.automaticallyChecksForUpdates, privacy: .public) interval=\(updater.updateCheckInterval, privacy: .public)s")
-    }
-
-    // Niacin checks for updates daily, period. The only escape hatch is the
-    // managed `disableAutoUpdate` key — IT teams push their own updates via
-    // JAMF and want self-update suppressed. There is no user-facing opt-out;
-    // we re-assert both fields on every policy reload so a stale UserDefaults
-    // value (e.g. SUEnableAutomaticChecks=false written by a prior version)
-    // can't survive a launch.
-    private let dailyCheckInterval: TimeInterval = 86_400
-
-    private func enforceAutoUpdatePolicy() {
-        guard let updater else { return }
-        let allowed = !ManagedPreferences.disableAutoUpdate
-        if updater.automaticallyChecksForUpdates != allowed {
-            updater.automaticallyChecksForUpdates = allowed
-            log.info("auto-update policy change → autoCheck=\(allowed, privacy: .public)")
-        }
-        if updater.updateCheckInterval != dailyCheckInterval {
-            updater.updateCheckInterval = dailyCheckInterval
-            log.info("update interval pinned → \(self.dailyCheckInterval, privacy: .public)s")
+            refreshCountdownTimer()
         }
     }
 
@@ -541,3 +455,86 @@ final class AppState {
         return nil
     }
 }
+
+// MARK: - MCPSession
+
+struct MCPSession: Sendable, Identifiable {
+    let id: String
+    let reason: String
+    let createdAt: Date
+    let expiresAt: Date?
+    let clientName: String?
+    let allowDisplaySleep: Bool
+}
+
+// MARK: - MCPDelegate conformance
+
+extension AppState: MCPDelegate {
+    func mcpKeepAwake(durationSeconds: Int?, reason: String, allowDisplaySleep: Bool, clientName: String?) -> MCPKeepAwakeResult {
+        let now = Date()
+        let expiresAt: Date? = durationSeconds.map { now.addingTimeInterval(TimeInterval($0)) }
+        let session = MCPSession(
+            id: UUID().uuidString,
+            reason: reason,
+            createdAt: now,
+            expiresAt: expiresAt,
+            clientName: clientName,
+            allowDisplaySleep: allowDisplaySleep
+        )
+        mcpSessions[session.id] = session
+
+        // Auto-release task — replaces a Timer so it survives a system sleep
+        // (Task.sleep is wall-clock, not run-loop).
+        if let duration = durationSeconds, duration > 0 {
+            let id = session.id
+            mcpSessionTasks[id] = Task { [weak self] in
+                try? await Task.sleep(for: .seconds(duration))
+                guard !Task.isCancelled else { return }
+                await MainActor.run {
+                    _ = self?.releaseMCPSession(id: id)
+                }
+            }
+        }
+
+        recomputeForceActiveAssertion()
+        updateTooltipForForceActive()
+        refreshCountdownTimer()
+        return MCPKeepAwakeResult(sessionId: session.id, expiresAt: expiresAt)
+    }
+
+    func mcpReleaseAwake(sessionId: String?) -> Bool {
+        if let id = sessionId {
+            return releaseMCPSession(id: id)
+        }
+        // No id → release every MCP-owned session.
+        let ids = Array(mcpSessions.keys)
+        var any = false
+        for id in ids { any = releaseMCPSession(id: id) || any }
+        return any
+    }
+
+    func mcpStatus() -> MCPStatus {
+        var sources: [String] = []
+        for s in mcpSessions.values {
+            sources.append("mcp:\(s.clientName ?? "agent")")
+        }
+        if preventer.isActive { sources.append("user") }
+
+        return MCPStatus(
+            keepingAwake: isKeepingAwake,
+            activeUntil: preventer.activeUntil,
+            forceActiveSources: sources
+        )
+    }
+
+    @discardableResult
+    func releaseMCPSession(id: String) -> Bool {
+        guard mcpSessions.removeValue(forKey: id) != nil else { return false }
+        mcpSessionTasks.removeValue(forKey: id)?.cancel()
+        recomputeForceActiveAssertion()
+        updateTooltipForForceActive()
+        refreshCountdownTimer()
+        return true
+    }
+}
+

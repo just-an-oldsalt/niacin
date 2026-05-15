@@ -11,6 +11,9 @@ struct AboutView: View {
         NSRunningApplication.current.icon ?? NSApp.applicationIconImage
     }
 
+    private let productName = "Niacin"
+    private let tagline = "Keep your computer awake — driven by you or your AI agents."
+
     var body: some View {
         VStack(spacing: 20) {
             Image(nsImage: appIcon)
@@ -18,7 +21,7 @@ struct AboutView: View {
                 .frame(width: 80, height: 80)
 
             VStack(spacing: 4) {
-                Text("Niacin")
+                Text(productName)
                     .font(.title2)
                     .fontWeight(.semibold)
                 Text(version)
@@ -26,7 +29,7 @@ struct AboutView: View {
                     .foregroundStyle(.secondary)
             }
 
-            Text("Keeps your Mac awake — built for the enterprise.")
+            Text(tagline)
                 .font(.callout)
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)

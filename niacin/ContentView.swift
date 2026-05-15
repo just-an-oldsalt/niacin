@@ -1,6 +1,5 @@
 import SwiftUI
 import AppKit
-import Sparkle
 
 struct MenuBarView: View {
     @Environment(AppState.self) private var appState
@@ -15,6 +14,14 @@ struct MenuBarView: View {
         // ManagedPreferences.* reads below pick up new values even if the
         // menu is already open.
         Group {
+            // Force-active sources — MCP sessions are addressable (per-session
+            // Release button), deploy/app matches are read-only.
+            if appState.hasForceActive {
+                Text("Active for:")
+                forceActiveRows
+                Divider()
+            }
+
             if appState.preventer.isActive {
                 Text(statusLabel)
                 Divider()
@@ -61,12 +68,6 @@ struct MenuBarView: View {
                 NSApp.activate(ignoringOtherApps: true)
             }
 
-            if !ManagedPreferences.disableAutoUpdate, let updater = appState.updater {
-                Button("Check for Updates…") {
-                    updater.checkForUpdates()
-                }
-            }
-
             if !ManagedPreferences.disableQuit {
                 Divider()
                 Button("Quit Niacin") {
@@ -87,6 +88,51 @@ struct MenuBarView: View {
             return String(localized: "Awake until \(time) · \(mode)")
         }
         return String(localized: "Keeping you awake · \(mode)")
+    }
+
+    // Rows that list every force-active source currently holding an
+    // assertion. Today that's just MCP sessions — each renders as a
+    // button so the user can release it directly from the menu.
+    @ViewBuilder
+    private var forceActiveRows: some View {
+        ForEach(sortedMCPSessions, id: \.id) { session in
+            Button {
+                appState.releaseMCPSession(id: session.id)
+            } label: {
+                Text(mcpRowLabel(for: session))
+            }
+        }
+    }
+
+    private var sortedMCPSessions: [MCPSession] {
+        appState.mcpSessions.values.sorted(by: { $0.createdAt < $1.createdAt })
+    }
+
+    private func mcpRowLabel(for s: MCPSession) -> String {
+        let client = s.clientName ?? "agent"
+        let suffix: String
+        if let expires = s.expiresAt {
+            let remaining = Int(expires.timeIntervalSinceNow)
+            if remaining > 0 {
+                suffix = " · \(Self.format(seconds: remaining)) left — release"
+            } else {
+                suffix = " · expiring — release"
+            }
+        } else {
+            suffix = " · indefinite — release"
+        }
+        return "· MCP: \(client)\(suffix)"
+    }
+
+    private static func format(seconds: Int) -> String {
+        if seconds >= 3600 {
+            let h = seconds / 3600
+            let m = (seconds % 3600) / 60
+            return m > 0 ? "\(h)h \(m)m" : "\(h)h"
+        } else if seconds >= 60 {
+            return "\(seconds / 60)m"
+        }
+        return "\(seconds)s"
     }
 }
 
