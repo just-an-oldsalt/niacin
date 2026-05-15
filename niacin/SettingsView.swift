@@ -154,11 +154,13 @@ struct SettingsView: View {
                         .foregroundStyle(.red)
                 }
                 Spacer()
-                Button(mcpCopiedFlash ? "Copied!" : "Copy Config Snippet") {
-                    copyConfigSnippet()
-                }
-                .disabled(mcpToken == nil)
             }
+
+            Button(mcpCopiedFlash ? "Copied!" : "Copy Config Snippet") {
+                copyConfigSnippet()
+            }
+            .disabled(mcpToken == nil)
+            .frame(maxWidth: .infinity)
         }
         .padding(.vertical, 4)
     }
