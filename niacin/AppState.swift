@@ -132,7 +132,7 @@ final class AppState {
             // didn't switch to the "active" state.
             tooltipText = String(localized: "Niacin — Error: \(err)")
         } else {
-            startCountdownTimer(timed: duration.timeInterval != nil)
+            refreshCountdownTimer()
         }
     }
 
@@ -144,7 +144,7 @@ final class AppState {
         log.info("deactivating (user request)")
         auditLog.info("deactivation: source=user")
         preventer.deactivate()
-        stopCountdownTimer()
+        refreshCountdownTimer()
         updateTooltipForForceActive()  // refresh in case force-active is still running
     }
 
@@ -345,68 +345,85 @@ final class AppState {
             ?? UserDefaults.standard.bool(forKey: "deactivateOnUserSwitch")
         if shouldDeactivate {
             preventer.deactivate()
-            stopCountdownTimer()
+            refreshCountdownTimer()
         }
     }
 
-    private func startCountdownTimer(timed: Bool) {
-        stopCountdownTimer()
+    // Soonest expiry across every deadline-bearing source — user session and
+    // MCP sessions. Drives the menu bar countdown so an agent-requested
+    // `keep_awake(30 min)` ticks down the same way a user-initiated 30-minute
+    // session does.
+    var soonestDeadline: Date? {
+        var candidates: [Date] = []
+        if let u = preventer.activeUntil { candidates.append(u) }
+        candidates.append(contentsOf: mcpSessions.values.compactMap { $0.expiresAt })
+        return candidates.min()
+    }
+
+    // Identity tracker for the gentle-warning beep — when the soonest
+    // deadline changes (one session expires, another takes over), we reset
+    // `beepedForCurrentSession` so the next deadline gets its own warning.
+    private var lastSoonestDeadline: Date?
+
+    private func refreshCountdownTimer() {
+        let needsTicker = soonestDeadline != nil
+        if needsTicker && countdownTimer == nil {
+            let t = Timer(timeInterval: 1, repeats: true) { [weak self] _ in
+                Task { @MainActor [weak self] in self?.updateCountdown() }
+            }
+            RunLoop.main.add(t, forMode: .common)
+            countdownTimer = t
+        }
         updateCountdown()
-        guard timed else { return }
-        let timer = Timer(timeInterval: 1, repeats: true) { [weak self] _ in
-            Task { @MainActor [weak self] in self?.updateCountdown() }
-        }
-        RunLoop.main.add(timer, forMode: .common)
-        countdownTimer = timer
-    }
-
-    private func stopCountdownTimer() {
-        countdownTimer?.invalidate()
-        countdownTimer = nil
-        countdownText = nil
-        isExpiringSoon = false
-        beepedForCurrentSession = false
-        // If force-active is keeping us awake even after the user session
-        // ends, leave the tooltip in its force-active form. Only reset to
-        // "Inactive" when nothing is keeping the system awake.
-        if hasForceActive {
-            updateTooltipForForceActive()
-        } else {
-            tooltipText = String(localized: "Niacin — Inactive")
+        if !needsTicker {
+            countdownTimer?.invalidate()
+            countdownTimer = nil
         }
     }
 
     private func updateCountdown() {
-        guard preventer.isActive else { stopCountdownTimer(); return }
-        guard let until = preventer.activeUntil else {
-            countdownText = nil
-            isExpiringSoon = false
-            tooltipText = String(localized: "Niacin — Keeping you awake")
-            return
+        let deadline = soonestDeadline
+        if deadline != lastSoonestDeadline {
+            // New deadline (or none) — reset the gentle-warning latch so the
+            // next session gets its own 30 s beep.
+            beepedForCurrentSession = false
         }
-        let remaining = Int(until.timeIntervalSinceNow)
-        guard remaining > 0 else {
-            countdownText = nil
-            isExpiringSoon = false
-            tooltipText = String(localized: "Niacin — Keeping you awake")
-            return
-        }
+        lastSoonestDeadline = deadline
 
-        // Gentle countdown warning: ≤30s remaining flips isExpiringSoon
-        // (drives orange-text styling in the menu bar) and plays a beep
-        // once if the user opted into the sound preference.
-        let nowExpiring = remaining <= 30
-        if nowExpiring && !isExpiringSoon && !beepedForCurrentSession {
-            if UserDefaults.standard.bool(forKey: "warnSoundOnExpiry") {
-                NSSound.beep()
+        if let deadline {
+            let remaining = Int(deadline.timeIntervalSinceNow)
+            if remaining > 0 {
+                let nowExpiring = remaining <= 30
+                if nowExpiring && !isExpiringSoon && !beepedForCurrentSession {
+                    if UserDefaults.standard.bool(forKey: "warnSoundOnExpiry") {
+                        NSSound.beep()
+                    }
+                    beepedForCurrentSession = true
+                }
+                isExpiringSoon = nowExpiring
+
+                let formatted = Self.format(seconds: remaining)
+                countdownText = formatted
+                tooltipText = String(localized: "Niacin — \(formatted) remaining")
+                return
             }
-            beepedForCurrentSession = true
+            // Deadline passed — expect a cleanup callback shortly (preventer
+            // auto-deactivate or MCP session task). Clear the countdown and
+            // fall through to the no-deadline tooltip logic.
+            countdownText = nil
+            isExpiringSoon = false
+        } else {
+            countdownText = nil
+            isExpiringSoon = false
         }
-        isExpiringSoon = nowExpiring
 
-        let formatted = Self.format(seconds: remaining)
-        countdownText = formatted
-        tooltipText = String(localized: "Niacin — \(formatted) remaining")
+        if preventer.isActive {
+            tooltipText = String(localized: "Niacin — Keeping you awake")
+        } else if hasForceActive {
+            updateTooltipForForceActive()
+        } else {
+            tooltipText = String(localized: "Niacin — Inactive")
+        }
     }
 
     private static func format(seconds: Int) -> String {
@@ -477,7 +494,7 @@ final class AppState {
         if let reason = sessionIncompatibilityReason() {
             log.info("deactivating running session: \(reason, privacy: .public)")
             preventer.deactivate()
-            stopCountdownTimer()
+            refreshCountdownTimer()
         }
     }
 
@@ -541,24 +558,25 @@ extension AppState: MCPDelegate {
                 try? await Task.sleep(for: .seconds(duration))
                 guard !Task.isCancelled else { return }
                 await MainActor.run {
-                    _ = self?.releaseMCPSessionInternal(id: id)
+                    _ = self?.releaseMCPSession(id: id)
                 }
             }
         }
 
         recomputeForceActiveAssertion()
         updateTooltipForForceActive()
+        refreshCountdownTimer()
         return MCPKeepAwakeResult(sessionId: session.id, expiresAt: expiresAt)
     }
 
     func mcpReleaseAwake(sessionId: String?) -> Bool {
         if let id = sessionId {
-            return releaseMCPSessionInternal(id: id)
+            return releaseMCPSession(id: id)
         }
         // No id → release every MCP-owned session.
         let ids = Array(mcpSessions.keys)
         var any = false
-        for id in ids { any = releaseMCPSessionInternal(id: id) || any }
+        for id in ids { any = releaseMCPSession(id: id) || any }
         return any
     }
 
@@ -579,11 +597,12 @@ extension AppState: MCPDelegate {
     }
 
     @discardableResult
-    fileprivate func releaseMCPSessionInternal(id: String) -> Bool {
+    func releaseMCPSession(id: String) -> Bool {
         guard mcpSessions.removeValue(forKey: id) != nil else { return false }
         mcpSessionTasks.removeValue(forKey: id)?.cancel()
         recomputeForceActiveAssertion()
         updateTooltipForForceActive()
+        refreshCountdownTimer()
         return true
     }
 }
