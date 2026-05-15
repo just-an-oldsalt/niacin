@@ -6,10 +6,6 @@ struct SettingsView: View {
     @AppStorage("preventDeviceLock") private var preventDeviceLock = false
     @AppStorage("deactivateOnUserSwitch") private var deactivateOnUserSwitch = false
     @AppStorage("warnSoundOnExpiry") private var warnSoundOnExpiry = false
-    // Default off. Mirrors the built-in default in
-    // ManagedPreferences.resolvedAIRuntimeAutoAwake so the UI state matches
-    // the actual behaviour on first launch.
-    @AppStorage("aiRuntimeAutoAwake") private var aiRuntimeAutoAwake = false
     @AppStorage("mcpServerEnabled") private var mcpServerEnabled = false
 
     @State private var appState = AppState.shared
@@ -50,17 +46,6 @@ struct SettingsView: View {
                 )
                 Toggle("Play a sound 30 seconds before a timed session ends",
                        isOn: $warnSoundOnExpiry)
-            }
-
-            Section("Auto-activation") {
-                ManagedToggle(
-                    "Keep awake while AI runtimes are running",
-                    isOn: $aiRuntimeAutoAwake,
-                    managed: ManagedPreferences.aiRuntimeAutoAwake
-                )
-                Text("Detects Ollama, LM Studio, llama.cpp, MLX, ComfyUI, InvokeAI, Stable Diffusion, vLLM, and mistralrs. For Ollama, force-active is released after 5 minutes with no model loaded into VRAM.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
             }
 
             Section("AI Agent Integration (MCP)") {
@@ -107,15 +92,6 @@ struct SettingsView: View {
                     if ManagedPreferences.allowedDurations != nil {
                         PolicyRow("Available durations set by policy", icon: "list.bullet", tint: .secondary)
                     }
-                    if let aiManaged = ManagedPreferences.aiRuntimeAutoAwake {
-                        PolicyRow(
-                            aiManaged
-                                ? "AI runtime auto-awake enforced on"
-                                : "AI runtime auto-awake disabled by policy",
-                            icon: "lock.fill",
-                            tint: .secondary
-                        )
-                    }
                 }
             }
         }
@@ -132,7 +108,6 @@ struct SettingsView: View {
         ManagedPreferences.maxDurationSeconds != nil ||
         ManagedPreferences.disableQuit           ||
         ManagedPreferences.allowedDurations != nil ||
-        ManagedPreferences.aiRuntimeAutoAwake != nil ||
         ManagedPreferences.mcpServerEnabled != nil
     }
 

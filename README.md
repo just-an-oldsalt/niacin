@@ -6,10 +6,10 @@ Niacin prevents your computer from sleeping on demand, with fine-grained control
 
 Niacin ships in two flavours from the same codebase:
 
-- **Niacin Enterprise** (this repo's GitHub Releases) — for IT-managed fleets. Distributed as `.dmg` / `.pkg`, no sandbox, no auto-update (IT pushes via MDM), with the full process-watcher (Tier 3) catch-all for arbitrary AI runtimes and deploy daemons.
-- **Niacin** (Mac App Store) — for individual users. Sandboxed, App-Store-updated, AI runtime detection via Tier 2 HTTP probes plus the MCP server. No process-watcher; the MAS sandbox filters `sysctl(KERN_PROC_ALL)` to the app's own processes, so that tier doesn't function and is compiled out.
+- **Niacin Enterprise** (this repo's GitHub Releases) — for IT-managed fleets. Distributed as `.dmg` / `.pkg`, no sandbox, no auto-update (IT pushes via MDM). Adds the IT-only process-watcher signals (`forceActiveDuringDeploys`, `forceActiveDuringApps`) on top of the shared MCP server.
+- **Niacin** (Mac App Store) — for individual users. Sandboxed, App-Store-updated. AI integration is handled exclusively via the MCP server — there is no inference of AI activity from process names or CPU; agents declare keep-awake intent directly.
 
-Both builds share Tier 1 (MCP server) and Tier 2 (probe registry).
+Both builds share the MCP server.
 
 ---
 
@@ -19,7 +19,6 @@ Both builds share Tier 1 (MCP server) and Tier 2 (probe registry).
 - **Flexible sleep control** — choose between full awake, system-only awake, or lock prevention per activation
 - **Timed activations** — activate for 5 minutes up to indefinitely, or set a hard cap via policy
 - **AI-agent native** — local MCP server lets Claude Desktop, Claude Code, Cursor, and other MCP clients request keep-awake assertions directly via the `keep_awake` tool, with bearer-token auth
-- **AI runtime auto-detection** — HTTP probes on loopback identify active Ollama, LM Studio, llama.cpp, text-generation-webui, and ComfyUI servers; Enterprise builds additionally scan for headless AI processes
 - **Enterprise-ready** — every setting manageable via a single MDM plist
 - **Lock indicators** — settings controlled by IT show a 🔒 icon; users can't override them
 - **Managed policy section** — settings window surfaces active IT constraints clearly
@@ -86,7 +85,6 @@ Any key present in the managed domain overrides the user's preference and locks 
 | `allowedDurations` | Array of Integer | *(defaults)* | Override the available duration list entirely |
 | `forceActiveDuringDeploys` | Array of String | *(empty)* | (Enterprise only.) Process-name patterns that, when matched against a running process, force Niacin awake silently. Designed for IT-deploy daemons (`jamf`, `installd`, `softwareupdated`, `munki`, `IntuneMdmAgent`, `mdmclient`, `Installer`) — the device won't sleep mid-deploy even if the user is away. Polled every 5 seconds. Names are case-insensitive substring matches against `kinfo_proc.p_comm`, kernel-limited to 16 chars. The MAS build has no process-watcher; this key is ignored there. |
 | `forceActiveDuringApps` | Array of String | *(empty)* | (Enterprise only.) Same shape as `forceActiveDuringDeploys` but for general apps (`zoom.us`, `OBS`, `obs-studio`, etc.). Force-activates while any matching process is running. |
-| `aiRuntimeAutoAwake` | Bool | `false` | Auto-detect local AI runtimes and force-activate while any is busy. Tier 2 HTTP probes (loopback, sandbox-safe) cover Ollama, LM Studio, llama.cpp server, text-generation-webui, and ComfyUI. For Ollama, the probe distinguishes "Ollama is running" from "a model is loaded into VRAM" — force-active is released 5 minutes after the last model unloads. Enterprise builds additionally Tier-3 scan for MLX, InvokeAI, Stable Diffusion WebUI, vLLM, mistralrs, etc. Off by default. |
 | `mcpServerEnabled` | Bool | `false` | Enable the local MCP (Model Context Protocol) server. When `true`: Niacin binds an HTTP listener on `127.0.0.1` (port 11473 by default) so paired AI agents — Claude Desktop, Claude Code, Cursor — can call the `keep_awake`, `release_awake`, and `status` tools via bearer-token-authenticated JSON-RPC. The token is user-generated in Settings and stored in Keychain. No external traffic. |
 
 ### Example plist
@@ -190,11 +188,10 @@ macOS will write the plist to `/Library/Managed Preferences/` and Niacin will pi
 
 ## For IT admins
 
-If your job is to keep a fleet of Macs awake during overnight deploys, the Enterprise build provides four force-activation signals that hold IOKit assertions independently of any user session:
+If your job is to keep a fleet of Macs awake during overnight deploys, the Enterprise build provides three force-activation signals that hold IOKit assertions independently of any user session:
 
 - **`forceActiveDuringDeploys`** — Niacin silently keeps the device awake while any of your configured deploy daemons are running (`jamf`, `installd`, `softwareupdated`, `munki`, `IntuneMdmAgent`, `mdmclient`, `Installer`). No menu bar flicker, no user prompt — the user wakes up to a finished deploy instead of a half-applied update. (Enterprise only — the MAS build's sandbox can't enumerate other processes.)
 - **`forceActiveDuringApps`** — same shape for any user-facing app where sleep-during-use is unacceptable (Zoom, Teams, OBS, custom internal tools). (Enterprise only.)
-- **`aiRuntimeAutoAwake`** — auto-detects locally-running AI runtimes. Tier 2 HTTP probes (sandbox-safe, both builds) catch active Ollama, LM Studio, llama.cpp, text-generation-webui, and ComfyUI servers. For Ollama, the probe distinguishes "running" from "model loaded" and releases the assertion 5 minutes after the last model unloads. Tier 3 process scans (Enterprise only) extend coverage to MLX, InvokeAI, Stable Diffusion WebUI, vLLM, mistralrs, and similar headless tools. Off by default.
 - **`mcpServerEnabled`** — exposes a localhost MCP endpoint so AI agents can request keep-awake assertions explicitly. More accurate than any heuristic: the agent declares intent rather than the watcher inferring it from CPU/process state.
 
 macOS composes the assertions, so a deploy continues even after the user has manually deactivated for the night.

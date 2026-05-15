@@ -100,18 +100,6 @@
                                 </array>
 
                                 <!--
-                                    Auto-detect known local-AI runtimes via Tier 2
-                                    HTTP probes (Ollama, LM Studio, llama.cpp,
-                                    text-generation-webui, ComfyUI) and, in the
-                                    Enterprise build only, Tier 3 process scans
-                                    (MLX, InvokeAI, Stable Diffusion, vLLM,
-                                    mistralrs). Off by default; set true here to
-                                    enforce on fleet-wide.
-                                -->
-                                <key>aiRuntimeAutoAwake</key>
-                                <true/>
-
-                                <!--
                                     Local-only MCP server for AI agent integration.
                                     When true, Niacin exposes 127.0.0.1:11473 to
                                     AI clients (Claude Desktop, Claude Code, Cursor)

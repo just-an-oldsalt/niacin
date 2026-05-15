@@ -99,24 +99,6 @@ struct ManagedPreferences {
             .compactMap { $0 as? String } ?? []
     }
 
-    // Whether to auto-detect known AI runtimes (Ollama, LM Studio,
-    // llama.cpp server, ComfyUI, etc.) and keep the device awake while
-    // they're loaded. The list is hardcoded (see defaultAIRuntimeProcesses).
-    // Managed-only — nil means user-controlled (resolves via
-    // resolvedAIRuntimeAutoAwake below). When managed, MDM wins.
-    static var aiRuntimeAutoAwake: Bool? { bool("aiRuntimeAutoAwake") }
-
-    // The effective value used by the AI watcher and Ollama inference probe:
-    // managed > user-defaults > built-in default (false). Off by default —
-    // process-presence detection alone would keep launchd-managed Ollama
-    // installs awake 24/7, which surprises users who didn't opt in. The AI
-    // workstation audience that wants this on can flip the Settings toggle
-    // (or IT can enforce it fleet-wide via the managed key).
-    static var resolvedAIRuntimeAutoAwake: Bool {
-        if let managed = aiRuntimeAutoAwake { return managed }
-        return UserDefaults.standard.bool(forKey: "aiRuntimeAutoAwake")
-    }
-
     // Whether the MCP (Model Context Protocol) server is allowed to run.
     // When true, Niacin binds an HTTP listener on 127.0.0.1 so AI agents
     // (Claude Desktop, Cursor, Claude Code, …) can request keep-awake
@@ -131,22 +113,6 @@ struct ManagedPreferences {
         if let managed = mcpServerEnabled { return managed }
         return UserDefaults.standard.bool(forKey: "mcpServerEnabled")
     }
-
-    // Known local-AI runtime process names. Case-insensitive substring
-    // match against p_comm. Truncation-aware — names that the kernel
-    // would chop are entered in their post-truncation form.
-    static let defaultAIRuntimeProcesses: [String] = [
-        "ollama",
-        "LM Studio",
-        "llama-server",
-        "mlx-lm",
-        "mlx_lm.server",
-        "ComfyUI",
-        "InvokeAI",
-        "stable-diffu",       // stable-diffusion-webui, truncated
-        "mistralrs",          // mistralrs-server, truncated
-        "vllm",
-    ]
 
     // True only if the key is set in a managed preferences plist (vs. user
     // defaults) — drives lock icons.

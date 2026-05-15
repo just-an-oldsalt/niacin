@@ -89,11 +89,11 @@ Cross-cutting items that don't fit cleanly into one stream.
 
 For the release notes:
 
-- ★ **MCP server** — Niacin exposes a localhost-only Model Context Protocol endpoint so AI agents (Claude Desktop, Claude Code, Cursor) can call `keep_awake`, `release_awake`, and `status` directly. Bearer-token auth, Keychain-stored. Opt-in via Settings.
+- ★ **MCP server** — Niacin exposes a localhost-only Model Context Protocol endpoint so AI agents (Claude Desktop, Claude Code, Cursor) can call `keep_awake`, `release_awake`, and `status` directly. Bearer-token auth, Keychain-stored. Opt-in via Settings. Replaces the v2.0 AI-runtime auto-detect (process scan + probe registry) — agents declare intent now instead of Niacin inferring it from process names.
 - ★ **Two distribution channels** — Enterprise (`Release` config, Developer-ID signed `.dmg`/`.pkg`, MDM-managed, no auto-update) and Mac App Store (`Release-MAS` config, sandboxed, App-Store-updated). Single target, conditional compilation via `MAS_BUILD` flag.
-- ★ **AIRuntimeProbeRegistry** — sandbox-safe HTTP probes against Ollama / LM Studio / llama.cpp / text-generation-webui / ComfyUI replace process-name scanning where it can. Authoritative for runtimes it covers; ProcessWatcher (Enterprise only) catches the rest.
 - **Sparkle removal** — auto-update via Sparkle replaced by App Store updates (MAS build) or IT-managed pushes (Enterprise build). Drops EdDSA key management, appcast hosting, and the ~300-line auto-update plumbing.
-- **App Sandbox enabled** for the MAS build — required for submission. `network.server` for the MCP listener, `network.client` for the probe registry.
+- **App Sandbox enabled** for the MAS build — required for submission. `network.server` for the MCP listener.
+- **AI runtime auto-awake retired** — the `aiRuntimeAutoAwake` managed key, the Settings toggle, the hardcoded AI process list, and the Ollama active-inference probe are all gone. MCP is the only path for agents to drive keep-awake.
 - New About-box copy: "Niacin Enterprise" vs "Niacin" depending on build.
 - README + RELEASING.md rewritten around the dual-distribution model.
 

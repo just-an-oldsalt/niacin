@@ -16,36 +16,28 @@ final class AppState {
     private var countdownTimer: Timer?
     private let policyWatcher = PolicyWatcher()
 
-    // ─── Force-active state (v2.0) ─────────────────────────────────────
+    // ─── Force-active state ────────────────────────────────────────────
     //
-    // Multiple signals feed into one set of IOKit power assertions held by
-    // AppState itself (separate from the user-session assertions held by
-    // `preventer`). When any signal is active, the force-active assertion
-    // is held; macOS composes both assertion pairs so the system stays
-    // awake whether the user activated manually OR a watcher matched, OR
-    // both.
+    // Two source families feed into a shared IOKit power-assertion pair
+    // (held by AppState, separate from the user-session assertions in
+    // `preventer`). macOS composes both pairs, so the system stays awake
+    // whether the user activated manually OR a force-active source is
+    // engaged, OR both.
     //
-    // AI runtime detection has two tiers:
-    //   - AIRuntimeProbeRegistry: HTTP probes against known runtimes' local
-    //     servers. Sandbox-safe (loopback only). Authoritative for runtimes
-    //     it covers — its idle verdict overrides any process-watcher match.
-    //   - ProcessWatcher: name scan via `sysctl(KERN_PROC_ALL)`. Catches
-    //     headless runtimes the probes don't know about. Requires unsandboxed
-    //     entitlements; only runs in Enterprise builds (see Phase 3).
+    //   - ProcessWatcher (Enterprise only): scans `sysctl(KERN_PROC_ALL)`
+    //     for IT-managed needle lists (`forceActiveDuringDeploys`,
+    //     `forceActiveDuringApps`). Compiled out in MAS builds — the
+    //     sandbox filters that syscall.
+    //   - MCP sessions: AI agents call `keep_awake` over the localhost
+    //     MCP server. Sessions self-release after their declared duration
+    //     via per-session Task watchdogs.
     #if !MAS_BUILD
     private var deployWatcher: ProcessWatcher?
     private var appWatcher: ProcessWatcher?
-    private var aiWatcher: ProcessWatcher?
     #endif
-    private var aiProbeRegistry: AIRuntimeProbeRegistry?
 
     private(set) var deployMatches: Set<String> = []
     private(set) var appMatches: Set<String> = []
-    // Raw process-name matches from the AI ProcessWatcher. Always empty in
-    // MAS builds (ProcessWatcher is compiled out — see ProcessWatcher.swift).
-    private(set) var aiRuntimeMatches: Set<String> = []
-    // Display names of runtimes reported busy by the probe registry.
-    private(set) var aiProbeMatches: Set<String> = []
 
     // MCP-driven keep-awake sessions. Each session corresponds to one
     // outstanding `keep_awake` tool call from an MCP client. Sessions self-
@@ -58,24 +50,9 @@ final class AppState {
     private var forceActiveSystemAssertion: IOPMAssertionID = 0
     private var forceActiveDisplayAssertion: IOPMAssertionID = 0
 
-    // Combined AI-runtime signal: probe matches (authoritative) plus process
-    // matches the probe doesn't already cover. If the probe knows about a
-    // runtime and reports it as idle/offline, the process scan can't override
-    // that — preserves the v2.0 behaviour of letting an idle Ollama drop out.
-    var effectiveAIRuntimeMatches: Set<String> {
-        let coveredByProbe = aiProbeRegistry?.coveredProcessNames ?? []
-        let processOnly = aiRuntimeMatches.filter { match in
-            !coveredByProbe.contains { covered in
-                match.lowercased().contains(covered.lowercased())
-            }
-        }
-        return aiProbeMatches.union(processOnly)
-    }
-
     var hasForceActive: Bool {
         !deployMatches.isEmpty
             || !appMatches.isEmpty
-            || !effectiveAIRuntimeMatches.isEmpty
             || !mcpSessions.isEmpty
     }
 
@@ -223,33 +200,7 @@ final class AppState {
             self?.handleWatcherChange(reason: "app", matches: matches)
         }
         appWatcher?.start()
-
-        aiWatcher = ProcessWatcher(
-            name: "ai-runtime",
-            needlesProvider: {
-                ManagedPreferences.resolvedAIRuntimeAutoAwake
-                    ? ManagedPreferences.defaultAIRuntimeProcesses
-                    : []
-            }
-        ) { [weak self] matches in
-            self?.handleWatcherChange(reason: "ai-runtime", matches: matches)
-        }
-        aiWatcher?.start()
         #endif
-
-        // Sandbox-safe probe layer for AI runtimes that expose HTTP servers
-        // (Ollama, LM Studio, llama.cpp, text-generation-webui, ComfyUI).
-        // Authoritative over its covered runtimes — a probe-reported idle
-        // overrides a process-name match for that same runtime.
-        aiProbeRegistry = AIRuntimeProbeRegistry { [weak self] busy in
-            guard let self else { return }
-            guard self.aiProbeMatches != busy else { return }
-            self.aiProbeMatches = busy
-            auditLog.info("ai-probe: busy=\(busy.sorted(), privacy: .public)")
-            self.recomputeForceActiveAssertion()
-            self.updateTooltipForForceActive()
-        }
-        aiProbeRegistry?.start()
     }
 
     // MARK: - MCP server lifecycle
@@ -284,9 +235,8 @@ final class AppState {
 
     private func handleWatcherChange(reason: String, matches: Set<String>) {
         switch reason {
-        case "deploy":     deployMatches = matches
-        case "app":        appMatches = matches
-        case "ai-runtime": aiRuntimeMatches = matches
+        case "deploy": deployMatches = matches
+        case "app":    appMatches = matches
         default: return
         }
 
@@ -360,7 +310,6 @@ final class AppState {
             let sources: [String] = [
                 deployMatches.isEmpty ? nil : "deploy",
                 appMatches.isEmpty ? nil : "app",
-                effectiveAIRuntimeMatches.isEmpty ? nil : "AI",
                 mcpSessions.isEmpty ? nil : "MCP",
             ].compactMap { $0 }
             tooltipText = String(localized: "Niacin — Active for \(sources.joined(separator: ", "))")
@@ -617,7 +566,6 @@ extension AppState: MCPDelegate {
         var sources: [String] = []
         if !deployMatches.isEmpty { sources.append("deploy(\(deployMatches.count))") }
         if !appMatches.isEmpty { sources.append("app(\(appMatches.count))") }
-        for name in effectiveAIRuntimeMatches.sorted() { sources.append("ai:\(name)") }
         for s in mcpSessions.values {
             sources.append("mcp:\(s.clientName ?? "agent")")
         }
