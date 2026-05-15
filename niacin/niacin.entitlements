@@ -2,14 +2,15 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
-	<!--
-	    Hardened Runtime is on (notarization requirement). Sparkle's helper
-	    binaries (Autoupdate, Updater.app, Installer.xpc, Downloader.xpc)
-	    are signed under the Sparkle framework's identity, not the host
-	    app's, so library validation would reject them at load time without
-	    this exception.
-	-->
-	<key>com.apple.security.cs.disable-library-validation</key>
+	<!-- App Sandbox: required for Mac App Store distribution, accepted by
+	     Gatekeeper for direct distribution too. With ProcessWatcher and the
+	     AI probe registry both retired in v2.1, no Niacin component needs
+	     anything outside the sandbox container. -->
+	<key>com.apple.security.app-sandbox</key>
+	<true/>
+	<!-- Local MCP server listens on 127.0.0.1 so AI agents can request
+	     keep-awake assertions. Bearer-token auth required on every request. -->
+	<key>com.apple.security.network.server</key>
 	<true/>
 </dict>
 </plist>

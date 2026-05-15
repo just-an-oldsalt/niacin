@@ -69,37 +69,6 @@
                                 <true/>
 
                                 <!--
-                                    Force-active during IT deploys (Enterprise).
-                                    Any matching running process forces Niacin awake
-                                    silently — no menu-bar flicker, no user prompt.
-                                    Polled every 5 s. Names are case-insensitive
-                                    substring matches against kinfo_proc.p_comm
-                                    (kernel-limited to 16 chars; entries must fit).
-                                -->
-                                <key>forceActiveDuringDeploys</key>
-                                <array>
-                                    <string>jamf</string>
-                                    <string>installd</string>
-                                    <string>softwareupdated</string>
-                                    <string>munki</string>
-                                    <string>IntuneMdmAgent</string>
-                                    <string>mdmclient</string>
-                                    <string>Installer</string>
-                                </array>
-
-                                <!--
-                                    Force-active during specific apps (Enterprise).
-                                    Same matching semantics as the deploy list.
-                                    Tweak for your organisation.
-                                -->
-                                <key>forceActiveDuringApps</key>
-                                <array>
-                                    <string>zoom.us</string>
-                                    <string>Microsoft Teams</string>
-                                    <string>obs</string>
-                                </array>
-
-                                <!--
                                     Local-only MCP server for AI agent integration.
                                     When true, Niacin exposes 127.0.0.1:11473 to
                                     AI clients (Claude Desktop, Claude Code, Cursor)

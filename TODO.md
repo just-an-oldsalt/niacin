@@ -89,13 +89,13 @@ Cross-cutting items that don't fit cleanly into one stream.
 
 For the release notes:
 
-- ★ **MCP server** — Niacin exposes a localhost-only Model Context Protocol endpoint so AI agents (Claude Desktop, Claude Code, Cursor) can call `keep_awake`, `release_awake`, and `status` directly. Bearer-token auth, Keychain-stored. Opt-in via Settings. Replaces the v2.0 AI-runtime auto-detect (process scan + probe registry) — agents declare intent now instead of Niacin inferring it from process names.
-- ★ **Two distribution channels** — Enterprise (`Release` config, Developer-ID signed `.dmg`/`.pkg`, MDM-managed, no auto-update) and Mac App Store (`Release-MAS` config, sandboxed, App-Store-updated). Single target, conditional compilation via `MAS_BUILD` flag.
-- **Sparkle removal** — auto-update via Sparkle replaced by App Store updates (MAS build) or IT-managed pushes (Enterprise build). Drops EdDSA key management, appcast hosting, and the ~300-line auto-update plumbing.
-- **App Sandbox enabled** for the MAS build — required for submission. `network.server` for the MCP listener.
-- **AI runtime auto-awake retired** — the `aiRuntimeAutoAwake` managed key, the Settings toggle, the hardcoded AI process list, and the Ollama active-inference probe are all gone. MCP is the only path for agents to drive keep-awake.
-- New About-box copy: "Niacin Enterprise" vs "Niacin" depending on build.
-- README + RELEASING.md rewritten around the dual-distribution model.
+- ★ **MCP server** — Niacin exposes a localhost-only Model Context Protocol endpoint so AI agents (Claude Desktop, Claude Code, Cursor) can call `keep_awake`, `release_awake`, and `status` directly. Bearer-token auth, Keychain-stored. Opt-in via Settings. The single way agents drive keep-awake — replaces v2.0's process-scan-for-AI-runtimes heuristic.
+- ★ **One sandboxed build, two distribution channels.** Same binary ships as GitHub `.dmg`/`.pkg` (Developer-ID signed) and through the Mac App Store. App Sandbox always on, `network.server` for the MCP listener, no other elevated entitlements.
+- **Sparkle removal** — auto-update via Sparkle replaced by the App Store's mechanism (for users on the MAS build) or IT-managed pushes (for users on the GitHub channel). Drops EdDSA key management, appcast hosting, and ~300 lines of auto-update plumbing.
+- **AI runtime auto-detect retired** — the `aiRuntimeAutoAwake` managed key, the Settings toggle, the hardcoded AI process list, the HTTP probe registry, and the Ollama active-inference probe are all gone.
+- **ProcessWatcher retired** — `forceActiveDuringDeploys` and `forceActiveDuringApps` managed keys are gone. `sysctl(KERN_PROC_ALL)` is sandbox-forbidden, and the IT use case ("don't sleep during overnight deploys") is better served by `pmset schedule wake` from MDM.
+- **Menu UI for MCP sessions** — when an agent holds a `keep_awake`, the menu shows "Active for: · MCP: <client> · <remaining> — release" with a click-to-release control. Menu bar countdown picks the soonest deadline across user-initiated and MCP-initiated holds.
+- README + RELEASING.md rewritten around the single-build, dual-channel model.
 
 ## Shipped in v2.0 (for the changelog)
 

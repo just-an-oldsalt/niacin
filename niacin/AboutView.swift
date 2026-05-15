@@ -11,21 +11,8 @@ struct AboutView: View {
         NSRunningApplication.current.icon ?? NSApp.applicationIconImage
     }
 
-    private var productName: String {
-        #if MAS_BUILD
-        return "Niacin"
-        #else
-        return "Niacin Enterprise"
-        #endif
-    }
-
-    private var tagline: String {
-        #if MAS_BUILD
-        return "Keep your computer awake — driven by you or your AI agents."
-        #else
-        return "Keep your computer awake — MDM-managed, audit-logged, AI-aware."
-        #endif
-    }
+    private let productName = "Niacin"
+    private let tagline = "Keep your computer awake — driven by you or your AI agents."
 
     var body: some View {
         VStack(spacing: 20) {

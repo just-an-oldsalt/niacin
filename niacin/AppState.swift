@@ -18,31 +18,12 @@ final class AppState {
 
     // ─── Force-active state ────────────────────────────────────────────
     //
-    // Two source families feed into a shared IOKit power-assertion pair
-    // (held by AppState, separate from the user-session assertions in
-    // `preventer`). macOS composes both pairs, so the system stays awake
-    // whether the user activated manually OR a force-active source is
-    // engaged, OR both.
-    //
-    //   - ProcessWatcher (Enterprise only): scans `sysctl(KERN_PROC_ALL)`
-    //     for IT-managed needle lists (`forceActiveDuringDeploys`,
-    //     `forceActiveDuringApps`). Compiled out in MAS builds — the
-    //     sandbox filters that syscall.
-    //   - MCP sessions: AI agents call `keep_awake` over the localhost
-    //     MCP server. Sessions self-release after their declared duration
-    //     via per-session Task watchdogs.
-    #if !MAS_BUILD
-    private var deployWatcher: ProcessWatcher?
-    private var appWatcher: ProcessWatcher?
-    #endif
-
-    private(set) var deployMatches: Set<String> = []
-    private(set) var appMatches: Set<String> = []
-
-    // MCP-driven keep-awake sessions. Each session corresponds to one
-    // outstanding `keep_awake` tool call from an MCP client. Sessions self-
-    // release via `mcpSessionTasks` once their duration elapses, or via an
-    // explicit `release_awake` call.
+    // MCP sessions feed into a shared IOKit power-assertion pair (held by
+    // AppState, separate from the user-session assertions in `preventer`).
+    // macOS composes both pairs, so the system stays awake whether the user
+    // activated manually OR an MCP client is holding `keep_awake`, OR both.
+    // Sessions self-release after their declared duration via per-session
+    // Task watchdogs.
     private(set) var mcpSessions: [String: MCPSession] = [:]
     private var mcpSessionTasks: [String: Task<Void, Never>] = [:]
     private(set) var mcpServer: MCPServer?
@@ -51,9 +32,7 @@ final class AppState {
     private var forceActiveDisplayAssertion: IOPMAssertionID = 0
 
     var hasForceActive: Bool {
-        !deployMatches.isEmpty
-            || !appMatches.isEmpty
-            || !mcpSessions.isEmpty
+        !mcpSessions.isEmpty
     }
 
     // True if Niacin is keeping the system awake for *any* reason — user
@@ -161,7 +140,6 @@ final class AppState {
         hasLaunched = true
 
         sweepOrphanCaffeinate()
-        startProcessWatchers()
         refreshMCPServer()
 
         let shouldActivate = ManagedPreferences.activateOnLaunch
@@ -179,28 +157,6 @@ final class AppState {
         )
 
         startPolicyWatcher()
-    }
-
-    // ─── Force-active watchers (v2.0) ──────────────────────────────────
-
-    private func startProcessWatchers() {
-        #if !MAS_BUILD
-        deployWatcher = ProcessWatcher(
-            name: "deploy",
-            needlesProvider: { ManagedPreferences.forceActiveDuringDeploys }
-        ) { [weak self] matches in
-            self?.handleWatcherChange(reason: "deploy", matches: matches)
-        }
-        deployWatcher?.start()
-
-        appWatcher = ProcessWatcher(
-            name: "apps",
-            needlesProvider: { ManagedPreferences.forceActiveDuringApps }
-        ) { [weak self] matches in
-            self?.handleWatcherChange(reason: "app", matches: matches)
-        }
-        appWatcher?.start()
-        #endif
     }
 
     // MARK: - MCP server lifecycle
@@ -233,24 +189,6 @@ final class AppState {
         }
     }
 
-    private func handleWatcherChange(reason: String, matches: Set<String>) {
-        switch reason {
-        case "deploy": deployMatches = matches
-        case "app":    appMatches = matches
-        default: return
-        }
-
-        // Structured audit-log entry that IT can grep for via `log show`.
-        if matches.isEmpty {
-            auditLog.info("force-active end: reason=\(reason, privacy: .public)")
-        } else {
-            auditLog.info("force-active begin: reason=\(reason, privacy: .public) matches=\(matches.sorted(), privacy: .public)")
-        }
-
-        recomputeForceActiveAssertion()
-        updateTooltipForForceActive()
-    }
-
     // Hold IOKit assertions for force-active reasons. These are independent
     // of the user-session assertions held by `preventer` — macOS composes
     // both pairs, so the system stays awake whenever EITHER pair is held.
@@ -260,7 +198,7 @@ final class AppState {
         if hasForceActive {
             // Acquire (idempotent — release first if already held).
             if forceActiveSystemAssertion == 0 {
-                let reason = "Niacin force-active (deploy / app / AI runtime)" as CFString
+                let reason = "Niacin force-active (MCP session)" as CFString
                 var sys: IOPMAssertionID = 0
                 let r1 = IOPMAssertionCreateWithName(
                     kIOPMAssertionTypePreventUserIdleSystemSleep as CFString,
@@ -307,12 +245,7 @@ final class AppState {
         guard !preventer.isActive else { return }
 
         if hasForceActive {
-            let sources: [String] = [
-                deployMatches.isEmpty ? nil : "deploy",
-                appMatches.isEmpty ? nil : "app",
-                mcpSessions.isEmpty ? nil : "MCP",
-            ].compactMap { $0 }
-            tooltipText = String(localized: "Niacin — Active for \(sources.joined(separator: ", "))")
+            tooltipText = String(localized: "Niacin — Active for MCP")
         } else {
             tooltipText = String(localized: "Niacin — Inactive")
         }
@@ -582,8 +515,6 @@ extension AppState: MCPDelegate {
 
     func mcpStatus() -> MCPStatus {
         var sources: [String] = []
-        if !deployMatches.isEmpty { sources.append("deploy(\(deployMatches.count))") }
-        if !appMatches.isEmpty { sources.append("app(\(appMatches.count))") }
         for s in mcpSessions.values {
             sources.append("mcp:\(s.clientName ?? "agent")")
         }

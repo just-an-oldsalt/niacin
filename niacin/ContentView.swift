@@ -91,9 +91,8 @@ struct MenuBarView: View {
     }
 
     // Rows that list every force-active source currently holding an
-    // assertion. MCP sessions render with an inline Release button; deploy
-    // and app matches are read-only labels (those are IT-managed and not
-    // user-releasable).
+    // assertion. Today that's just MCP sessions — each renders as a
+    // button so the user can release it directly from the menu.
     @ViewBuilder
     private var forceActiveRows: some View {
         ForEach(sortedMCPSessions, id: \.id) { session in
@@ -102,12 +101,6 @@ struct MenuBarView: View {
             } label: {
                 Text(mcpRowLabel(for: session))
             }
-        }
-        ForEach(appState.deployMatches.sorted(), id: \.self) { match in
-            Text("· Deploy: \(match)")
-        }
-        ForEach(appState.appMatches.sorted(), id: \.self) { match in
-            Text("· App: \(match)")
         }
     }
 
