@@ -149,18 +149,15 @@ struct SettingsView: View {
                 if mcpToken == nil {
                     Button("Generate Token") { generateToken() }
                 } else {
-                    Button("Rotate Token") { generateToken() }
+                    Button("Rotate") { generateToken() }
                     Button("Revoke") { revokeToken() }
                         .foregroundStyle(.red)
+                    Button(mcpCopiedFlash ? "Copied!" : "Copy Config") {
+                        copyConfigSnippet()
+                    }
                 }
                 Spacer()
             }
-
-            Button(mcpCopiedFlash ? "Copied!" : "Copy Config Snippet") {
-                copyConfigSnippet()
-            }
-            .disabled(mcpToken == nil)
-            .frame(maxWidth: .infinity)
         }
         .padding(.vertical, 4)
     }
