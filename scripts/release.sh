@@ -1,14 +1,15 @@
 #!/usr/bin/env bash
 #
-# scripts/release.sh — build a signed, notarized Niacin Enterprise release.
+# scripts/release.sh — build a signed, notarized Niacin release for the
+# GitHub Releases channel.
 #
 # Produces both a .dmg (drag-to-Applications) and a .pkg (Installer.app
 # / MDM-friendly) in build/release/artifacts/, plus a SHA-256 sums file
 # and a ready-to-paste `gh release create` command at the end.
 #
-# The Enterprise channel has no auto-update — IT pushes new versions via
-# MDM. The Mac App Store build is a separate target archived from Xcode
-# directly and is not produced by this script.
+# The Mac App Store build comes from the same sandboxed binary but is
+# uploaded via Xcode Organizer (Archive → Distribute → App Store Connect),
+# not by this script.
 #
 # Usage:
 #     ./scripts/release.sh VERSION
@@ -223,10 +224,10 @@ cat <<EOF
 
 To publish to GitHub:
 
-    git tag -a v$VERSION -m "Niacin Enterprise $VERSION"
+    git tag -a v$VERSION -m "Niacin $VERSION"
     git push origin v$VERSION
     gh release create v$VERSION \\
-        --title "Niacin Enterprise $VERSION" \\
+        --title "Niacin $VERSION" \\
         --generate-notes \\
         "$DMG" \\
         "$PKG" \\
